@@ -17,6 +17,8 @@ class Zadel(Base):
     __tablename__ = 'zadels'
     id = Column(Integer, primary_key=True)
     name = Column(String(200), nullable=False)
+    supervisor = Column(String(200))          # ФИО научного руководителя
+    department = Column(String(200))          # Подразделение МИЭМ
     grnti = Column(String(50))
     collective = Column(String(100))
     team = Column(Text)
@@ -71,6 +73,8 @@ class Hypothesis(Base):
     ugt = Column(Integer)
     competitor = Column(String(200))
     advantage = Column(Text)
+    problem = Column(Text)               # Решаемая проблема заказчика
+    partner_name = Column(String(200))   # Название партнёра
     budget = Column(Integer)
     horizon = Column(String(50))
     status = Column(String(50))
@@ -99,6 +103,31 @@ class Task(Base):
 
 # Создаём таблицы
 Base.metadata.create_all(engine)
+
+# Автоматическая миграция для добавления новых колонок (если их нет)
+def migrate_db():
+    conn = engine.connect()
+    # Добавляем колонки в zadels, если отсутствуют
+    try:
+        conn.execute("ALTER TABLE zadels ADD COLUMN supervisor VARCHAR(200)")
+    except Exception:
+        pass
+    try:
+        conn.execute("ALTER TABLE zadels ADD COLUMN department VARCHAR(200)")
+    except Exception:
+        pass
+    # Добавляем колонки в hypotheses
+    try:
+        conn.execute("ALTER TABLE hypotheses ADD COLUMN problem TEXT")
+    except Exception:
+        pass
+    try:
+        conn.execute("ALTER TABLE hypotheses ADD COLUMN partner_name VARCHAR(200)")
+    except Exception:
+        pass
+    conn.close()
+
+migrate_db()
 
 # Инициализация справочников
 def init_dicts():
@@ -183,7 +212,6 @@ if page == "Дашборд":
     # ----- Матрица "Организация × Коллектив" с фильтрами -----
     st.subheader("Матрица «Организация × Коллектив»")
     
-    # Фильтры
     col_filter1, col_filter2, col_filter3 = st.columns(3)
     with col_filter1:
         participation_filter = st.selectbox("Тип участия", ["Все", "Заказчик", "Партнёр"])
@@ -192,7 +220,6 @@ if page == "Дашборд":
     with col_filter3:
         role_filter = st.selectbox("Роль МИЭМ", ["Все"] + [r.name for r in session.query(MiemRole).all()])
     
-    # Получаем организации и коллективы
     orgs = session.query(Organization).all()
     collectives = session.query(Zadel.collective).distinct().filter(Zadel.collective.isnot(None)).all()
     collectives = [c[0] for c in collectives if c[0]]
@@ -202,19 +229,16 @@ if page == "Дашборд":
         for org in orgs:
             row = {"Организация": org.name}
             for coll in collectives:
-                # Базовый запрос гипотез для пары организация-коллектив
                 query = session.query(Hypothesis).join(Zadel, Hypothesis.zadel_id == Zadel.id).filter(
                     Hypothesis.org_id == org.id,
                     Zadel.collective == coll
                 )
-                # Применяем фильтры
                 if participation_filter != "Все":
                     query = query.filter(Hypothesis.participation_type == participation_filter)
                 if role_filter != "Все":
                     role = session.query(MiemRole).filter(MiemRole.name == role_filter).first()
                     if role:
                         query = query.filter(Hypothesis.miem_role_id == role.id)
-                # Фильтр по УГТ задела
                 query = query.filter(Zadel.ugt >= ugt_min)
                 count = query.count()
                 row[coll] = count
@@ -232,16 +256,13 @@ if page == "Дашборд":
     def calculate_priority(hypothesis):
         org_priority = hypothesis.organization.priority if hypothesis.organization else 5
         ugt = hypothesis.ugt if hypothesis.ugt else 1
-        # Сумма весов барьеров
         barriers = session.query(HypothesisBarrier).filter(HypothesisBarrier.hypothesis_id == hypothesis.id).all()
         total_weight = 0
         for hb in barriers:
             b = session.query(Barrier).filter(Barrier.id == hb.barrier_id).first()
             if b:
                 total_weight += b.weight
-        # Штраф: сумма весов / 10 (нормировка, чтобы максимальный штраф ~ 10)
         penalty = total_weight / 10
-        # Приоритет: (приоритет организации * 0.5 + УГТ * 0.5) - штраф
         priority = (org_priority * 0.5 + ugt * 0.5) - penalty
         return max(priority, 0)
     
@@ -263,11 +284,7 @@ if page == "Дашборд":
             with st.container():
                 st.markdown(f"**{row['name']}**  (приоритет: {row['priority']:.1f})")
                 st.write(f"Организация: {row['organization']} | Статус: {row['status']}")
-                # Кнопка для быстрого перехода к редактированию (позже)
                 if st.button(f"Перейти к гипотезе", key=f"goto_{row['id']}"):
-                    st.session_state['edit_hypothesis_id'] = row['id']
-                    st.switch_page("app.py")  # не работает в Streamlit, лучше установить сессию и редирект
-                    # Временно просто сообщаем
                     st.info(f"Вы выбрали гипотезу ID {row['id']}. Перейдите на вкладку «Совместная деятельность» для редактирования.")
                 st.divider()
     else:
@@ -275,55 +292,49 @@ if page == "Дашборд":
     
     st.divider()
     
-    # ----- Виджет авторекомендаций с весами барьеров -----
+    # ----- Виджет авторекомендаций -----
     st.subheader("Рекомендации")
     
     recommendations = []
     
-    # 1. Заделы с УГТ ≤ 3 без активных гипотез
     low_ugt_zadels = session.query(Zadel).filter(Zadel.ugt <= 3).all()
     for z in low_ugt_zadels:
         hyp_count = session.query(Hypothesis).filter(Hypothesis.zadel_id == z.id).count()
         if hyp_count == 0:
-            recommendations.append(f"📌 **Задел «{z.name}»** (УГТ={z.ugt}) не используется. Рекомендуется подать заявку на грант или найти индустриального партнёра для повышения УГТ.")
+            recommendations.append(f"📌 **Задел «{z.name}** (УГТ={z.ugt}) не используется. Рекомендуется подать заявку на грант или найти индустриального партнёра.")
     
-    # 2. Неоформленные РИД = "Алгоритмы/методы" без патента
     unprotected_zadels = session.query(Zadel).filter(Zadel.rid_unprotected == "Алгоритмы/методы").all()
     for z in unprotected_zadels:
         if not z.rid_protected:
-            recommendations.append(f"🔐 **Задел «{z.name}»**: неоформленные РИД – «Алгоритмы/методы». Оформите патент или свидетельство о ПО.")
+            recommendations.append(f"🔐 **Задел «{z.name}**: неоформленные РИД – «Алгоритмы/методы». Оформите патент или свидетельство о ПО.")
     
-    # 3. Организации с высоким приоритетом (≥8) без активных гипотез
     high_priority_orgs = session.query(Organization).filter(Organization.priority >= 8).all()
     for org in high_priority_orgs:
         hyp_count = session.query(Hypothesis).filter(Hypothesis.org_id == org.id).count()
         if hyp_count == 0:
-            recommendations.append(f"🏢 **Организация «{org.name}»** имеет высокий приоритет ({org.priority}), но нет активных гипотез. Инициируйте контакт.")
+            recommendations.append(f"🏢 **Организация «{org.name}** имеет высокий приоритет ({org.priority}), но нет активных гипотез. Инициируйте контакт.")
     
-    # 4. Гипотезы с барьером "Нет подходящего партнёра" (вес 6)
     barrier_partner = session.query(Barrier).filter(Barrier.name == "Нет подходящего партнёра").first()
     if barrier_partner:
         hyp_with_partner_barrier = session.query(HypothesisBarrier).filter(HypothesisBarrier.barrier_id == barrier_partner.id).all()
         for hb in hyp_with_partner_barrier:
             hyp = session.query(Hypothesis).filter(Hypothesis.id == hb.hypothesis_id).first()
             if hyp:
-                recommendations.append(f"🤝 **Гипотеза «{hyp.name}»**: барьер «Нет подходящего партнёра». Рекомендуется найти партнёра в индустрии {hyp.organization.industry if hyp.organization else '?'}.")
+                recommendations.append(f"🤝 **Гипотеза «{hyp.name}**: барьер «Нет подходящего партнёра». Рекомендуется найти партнёра в индустрии {hyp.organization.industry if hyp.organization else '?'}.")
     
-    # 5. Заделы с УГТ ≥ 6 без гипотез с ролью Лицензиар
     high_ugt_zadels = session.query(Zadel).filter(Zadel.ugt >= 6).all()
     lic_role = session.query(MiemRole).filter(MiemRole.name == "Лицензиар").first()
     if lic_role:
         for z in high_ugt_zadels:
             hyp_count = session.query(Hypothesis).filter(Hypothesis.zadel_id == z.id, Hypothesis.miem_role_id == lic_role.id).count()
             if hyp_count == 0:
-                recommendations.append(f"💼 **Задел «{z.name}»** (УГТ={z.ugt}) готов к лицензированию. Инициируйте предложение роли «Лицензиар».")
+                recommendations.append(f"💼 **Задел «{z.name}** (УГТ={z.ugt}) готов к лицензированию. Инициируйте предложение роли «Лицензиар».")
     
-    # 6. Гипотезы с высоким суммарным весом барьеров (штраф > 3)
     for h in hypotheses:
         barriers = session.query(HypothesisBarrier).filter(HypothesisBarrier.hypothesis_id == h.id).all()
         total_weight = sum([session.query(Barrier).get(b.barrier_id).weight for b in barriers if session.query(Barrier).get(b.barrier_id)])
         if total_weight > 3:
-            recommendations.append(f"⚠️ **Гипотеза «{h.name}»**: суммарный вес барьеров = {total_weight}. Рекомендуется провести анализ и снизить барьеры.")
+            recommendations.append(f"⚠️ **Гипотеза «{h.name}**: суммарный вес барьеров = {total_weight}. Рекомендуется провести анализ и снизить барьеры.")
     
     if recommendations:
         for rec in recommendations[:5]:
@@ -341,6 +352,35 @@ elif page == "Паспорта (заделы)":
     with st.expander("➕ Добавить новый задел", expanded=False):
         with st.form("new_zadel_form"):
             name = st.text_input("Название задела*")
+            supervisor = st.text_input("ФИО научного руководителя")
+            department = st.selectbox("Подразделение МИЭМ", [
+                "Центр квантовых метаматериалов",
+                "Международная лаборатория физики элементарных частиц",
+                "Научно-технический центр прикладной электроники",
+                "Научно-учебная лаборатория квантовой наноэлектроники",
+                "Научно-учебная лаборатория телекоммуникационных систем",
+                "Научная лаборатория Интернета вещей и киберфизических систем",
+                "Учебно-исследовательская лаборатория функциональной безопасности космических аппаратов и систем",
+                "Лаборатория «Математические методы естествознания»",
+                "Лаборатория вычислительной физики",
+                "Лаборатория динамических систем и приложений",
+                "Учебно-исследовательская лаборатория Интернет технологий и сервисов",
+                "Учебная лаборатория 3Д-визуализации и компьютерной графики",
+                "Учебная лаборатория элементов и устройств встраиваемых систем",
+                "Учебная лаборатория систем автоматизированного проектирования",
+                "Учебная лаборатория сетевых технологий",
+                "Учебная лаборатория сетевых видеотехнологий",
+                "Учебная лаборатория моделирования систем защиты информации и криптографии",
+                "Учебная лаборатория общей и квантовой физики",
+                "Учебная лаборатория квантовых технологий",
+                "Учебная лаборатория метрологии и измерительных технологий",
+                "Учебная лаборатория надежности электронных средств киберфизических систем",
+                "Учебная лаборатория моделирования и проектирования электронных компонентов и устройств",
+                "Учебная лаборатория микроволновой и оптоэлектронной инженерии",
+                "Учебная лаборатория телекоммуникационных технологий и систем связи",
+                "Учебная лаборатория электроники и схемотехники",
+                "Другое подразделение"
+            ])
             grnti = st.text_input("Шифр ГРНТИ")
             collective = st.text_input("Коллектив (научная группа)")
             team = st.text_area("Команда (количество, состав, ФИО)")
@@ -355,9 +395,10 @@ elif page == "Паспорта (заделы)":
             submitted = st.form_submit_button("Сохранить задел")
             if submitted and name:
                 session = Session()
-                new_z = Zadel(name=name, grnti=grnti, collective=collective, team=team,
-                              competencies=competencies, publications=publications, grants=grants,
-                              niokr=niokr, rid_protected=rid_protected,
+                new_z = Zadel(name=name, supervisor=supervisor, department=department, grnti=grnti,
+                              collective=collective, team=team, competencies=competencies,
+                              publications=publications, grants=grants, niokr=niokr,
+                              rid_protected=rid_protected,
                               rid_unprotected=rid_unprotected if rid_unprotected else None,
                               ugt=ugt, next_ugt_needs=next_ugt_needs)
                 session.add(new_z)
@@ -368,12 +409,12 @@ elif page == "Паспорта (заделы)":
             elif submitted and not name:
                 st.error("Название обязательно")
     
-    # Список заделов с возможностью редактирования и удаления
+    # Список заделов с возможностью редактирования
     st.subheader("Существующие заделы")
     session = Session()
     zadels = session.query(Zadel).all()
     if zadels:
-        df = pd.DataFrame([{"ID": z.id, "Название": z.name, "УГТ": z.ugt, "Коллектив": z.collective, "ГРНТИ": z.grnti} for z in zadels])
+        df = pd.DataFrame([{"ID": z.id, "Название": z.name, "УГТ": z.ugt, "Коллектив": z.collective, "ГРНТИ": z.grnti, "Руководитель": z.supervisor, "Подразделение": z.department} for z in zadels])
         st.dataframe(df, use_container_width=True)
         
         selected_id = st.selectbox("Выберите ID задела для просмотра/редактирования", [z.id for z in zadels])
@@ -383,6 +424,35 @@ elif page == "Паспорта (заделы)":
                 with st.expander("Редактировать задел"):
                     with st.form("edit_zadel"):
                         new_name = st.text_input("Название", value=z.name)
+                        new_supervisor = st.text_input("ФИО научного руководителя", value=z.supervisor or "")
+                        new_department = st.selectbox("Подразделение МИЭМ", [
+                            "Центр квантовых метаматериалов",
+                            "Международная лаборатория физики элементарных частиц",
+                            "Научно-технический центр прикладной электроники",
+                            "Научно-учебная лаборатория квантовой наноэлектроники",
+                            "Научно-учебная лаборатория телекоммуникационных систем",
+                            "Научная лаборатория Интернета вещей и киберфизических систем",
+                            "Учебно-исследовательская лаборатория функциональной безопасности космических аппаратов и систем",
+                            "Лаборатория «Математические методы естествознания»",
+                            "Лаборатория вычислительной физики",
+                            "Лаборатория динамических систем и приложений",
+                            "Учебно-исследовательская лаборатория Интернет технологий и сервисов",
+                            "Учебная лаборатория 3Д-визуализации и компьютерной графики",
+                            "Учебная лаборатория элементов и устройств встраиваемых систем",
+                            "Учебная лаборатория систем автоматизированного проектирования",
+                            "Учебная лаборатория сетевых технологий",
+                            "Учебная лаборатория сетевых видеотехнологий",
+                            "Учебная лаборатория моделирования систем защиты информации и криптографии",
+                            "Учебная лаборатория общей и квантовой физики",
+                            "Учебная лаборатория квантовых технологий",
+                            "Учебная лаборатория метрологии и измерительных технологий",
+                            "Учебная лаборатория надежности электронных средств киберфизических систем",
+                            "Учебная лаборатория моделирования и проектирования электронных компонентов и устройств",
+                            "Учебная лаборатория микроволновой и оптоэлектронной инженерии",
+                            "Учебная лаборатория телекоммуникационных технологий и систем связи",
+                            "Учебная лаборатория электроники и схемотехники",
+                            "Другое подразделение"
+                        ], index=[d for d in department_list].index(z.department) if z.department in department_list else 0)
                         new_grnti = st.text_input("Шифр ГРНТИ", value=z.grnti or "")
                         new_collective = st.text_input("Коллектив", value=z.collective or "")
                         new_team = st.text_area("Команда", value=z.team or "")
@@ -401,6 +471,8 @@ elif page == "Паспорта (заделы)":
                             delete = st.form_submit_button("Удалить задел")
                         if save:
                             z.name = new_name
+                            z.supervisor = new_supervisor
+                            z.department = new_department
                             z.grnti = new_grnti
                             z.collective = new_collective
                             z.team = new_team
@@ -423,6 +495,8 @@ elif page == "Паспорта (заделы)":
                 st.subheader("Детали задела")
                 col1, col2 = st.columns(2)
                 with col1:
+                    st.markdown(f"**Руководитель:** {z.supervisor or ''}")
+                    st.markdown(f"**Подразделение:** {z.department or ''}")
                     st.markdown(f"**Шифр ГРНТИ:** {z.grnti or ''}")
                     st.markdown(f"**Коллектив:** {z.collective or ''}")
                     st.markdown(f"**Команда:** {z.team or ''}")
@@ -608,6 +682,8 @@ elif page == "Совместная деятельность":
                 role_name = st.selectbox("Роль МИЭМ", list(role_options.keys()) if role_options else ["Нет ролей"])
                 competitor = st.text_input("Конкурент (название)")
                 advantage = st.text_area("Преимущество перед конкурентом")
+                problem = st.text_area("Решаемая проблема заказчика")
+                partner_name = st.text_input("Название партнёра (внешняя организация)")
                 session = Session()
                 barriers = session.query(Barrier).all()
                 barrier_names = [b.name for b in barriers]
@@ -624,7 +700,9 @@ elif page == "Совместная деятельность":
                     z = session.query(Zadel).filter(Zadel.id == zadel_id).first()
                     new_h = Hypothesis(name=name, org_id=org_id, participation_type=part_type,
                                        miem_role_id=role_options.get(role_name), zadel_id=zadel_id, ugt=z.ugt,
-                                       competitor=competitor, advantage=advantage, budget=budget if budget else None,
+                                       competitor=competitor, advantage=advantage,
+                                       problem=problem, partner_name=partner_name,
+                                       budget=budget if budget else None,
                                        horizon=horizon, status=status, responsible=responsible, docs_link=docs_link,
                                        created_at=str(date.today()))
                     session.add(new_h)
@@ -664,7 +742,6 @@ elif page == "Совместная деятельность":
                             new_name = st.text_input("Название", value=h.name)
                             new_part_type = st.radio("Тип участия", ["Заказчик", "Партнёр"], index=0 if h.participation_type == "Заказчик" else 1, horizontal=True)
                             
-                            # Роль МИЭМ
                             role_options_list = list(role_dict.values())
                             current_role_name = role_dict.get(h.miem_role_id, role_options_list[0] if role_options_list else "")
                             try:
@@ -675,6 +752,8 @@ elif page == "Совместная деятельность":
                             
                             new_competitor = st.text_input("Конкурент", value=h.competitor or "")
                             new_advantage = st.text_area("Преимущество", value=h.advantage or "")
+                            new_problem = st.text_area("Решаемая проблема", value=h.problem or "")
+                            new_partner_name = st.text_input("Партнёр", value=h.partner_name or "")
                             
                             session_b = Session()
                             barriers_all = session_b.query(Barrier).all()
@@ -690,7 +769,6 @@ elif page == "Совместная деятельность":
                             
                             new_budget = st.number_input("Бюджет", value=h.budget or 0)
                             
-                            # Горизонт
                             horizon_options = ["0-3 мес", "3-6 мес", "6-12 мес", "1-3 года"]
                             try:
                                 horizon_index = horizon_options.index(h.horizon) if h.horizon else 0
@@ -698,7 +776,6 @@ elif page == "Совместная деятельность":
                                 horizon_index = 0
                             new_horizon = st.selectbox("Горизонт", horizon_options, index=horizon_index)
                             
-                            # Статус
                             status_options = ["идентифицирована", "квалифицирована", "предложение отправлено", "переговоры", "контракт", "исполнение", "завершён"]
                             try:
                                 status_index = status_options.index(h.status) if h.status else 0
@@ -722,12 +799,13 @@ elif page == "Совместная деятельность":
                                 h.miem_role_id = new_role_id
                                 h.competitor = new_competitor
                                 h.advantage = new_advantage
+                                h.problem = new_problem
+                                h.partner_name = new_part_name
                                 h.budget = new_budget if new_budget else None
                                 h.horizon = new_horizon
                                 h.status = new_status
                                 h.responsible = new_responsible
                                 h.docs_link = new_docs_link
-                                # Обновляем барьеры
                                 session.query(HypothesisBarrier).filter(HypothesisBarrier.hypothesis_id == h.id).delete()
                                 for bname in new_barriers:
                                     b = session.query(Barrier).filter(Barrier.name == bname).first()
@@ -756,6 +834,9 @@ elif page == "Совместная деятельность":
                         st.write(f"**Горизонт:** {h.horizon or '—'}")
                         st.write(f"**Ответственный:** {h.responsible or '—'}")
                         st.write(f"**Ссылка:** {h.docs_link or '—'}")
+                    st.write(f"**Решаемая проблема:** {h.problem or '—'}")
+                    st.write(f"**Партнёр:** {h.partner_name or '—'}")
+                    
                     barriers_h = session.query(HypothesisBarrier).filter(HypothesisBarrier.hypothesis_id == h.id).all()
                     barrier_names_h = []
                     for bh in barriers_h:
@@ -835,60 +916,67 @@ elif page == "Импорт из Excel":
                 
                 for idx, row in df.iterrows():
                     try:
+                        # ----- 1. Организация (заказчик) -----
                         org_name = row.get("Название заказчика")
                         if pd.isna(org_name) or not str(org_name).strip():
                             continue
                         org_name = str(org_name).strip()
+                        
                         if org_name not in org_cache:
                             org = session.query(Organization).filter(Organization.name == org_name).first()
                             if not org:
-                                org = Organization(name=org_name, notes=row.get("Решаемая проблема") if not pd.isna(row.get("Решаемая проблема")) else None)
+                                notes = str(row.get("Решаемая проблема")) if not pd.isna(row.get("Решаемая проблема")) else ""
+                                org = Organization(name=org_name, notes=notes)
                                 session.add(org)
                                 session.flush()
                                 stats["orgs"] += 1
                             org_cache[org_name] = org.id
                         org_id = org_cache[org_name]
                         
-                        collective_name = row.get("Подразделение")
-                        if not pd.isna(collective_name) and collective_name:
-                            collective_name = str(collective_name).strip()
-                        else:
-                            collective_name = None
+                        # ----- 2. Задел (научное направление) -----
+                        grnti = str(row.get("Шифр ГРНТИ")) if not pd.isna(row.get("Шифр ГРНТИ")) else ""
+                        competence = str(row.get("Ключевая компетенция")) if not pd.isna(row.get("Ключевая компетенция")) else ""
+                        supervisor = str(row.get("Руководитель")) if not pd.isna(row.get("Руководитель")) else ""
+                        department = str(row.get("Подразделение")) if not pd.isna(row.get("Подразделение")) else ""
                         
-                        grnti = row.get("Шифр ГРНТИ")
-                        competence = row.get("Ключевая компетенция")
-                        if pd.isna(grnti):
-                            grnti = ""
-                        else:
-                            grnti = str(grnti).strip()
-                        if pd.isna(competence):
-                            competence = ""
-                        else:
-                            competence = str(competence).strip()
-                        zadel_key = f"{grnti}|{competence[:100]}"
+                        zadel_key = f"{grnti}|{competence[:100]}|{supervisor}"
                         if zadel_key not in zadel_cache:
-                            existing_zadel = session.query(Zadel).filter(Zadel.grnti == grnti, Zadel.competencies == competence).first()
+                            existing_zadel = session.query(Zadel).filter(
+                                Zadel.grnti == grnti,
+                                Zadel.competencies == competence,
+                                Zadel.supervisor == supervisor
+                            ).first()
                             if not existing_zadel:
-                                team = row.get("Команда") if not pd.isna(row.get("Команда")) else ""
-                                publications = row.get("Публикации") if not pd.isna(row.get("Публикации")) else ""
-                                grants = row.get("Гранты") if not pd.isna(row.get("Гранты")) else ""
-                                niokr = row.get("НИОКР") if not pd.isna(row.get("НИОКР")) else ""
-                                rid_protected = row.get("Охраняемые РИД") if not pd.isna(row.get("Охраняемые РИД")) else ""
-                                rid_unprotected = row.get("Неоформленные РИД") if not pd.isna(row.get("Неоформленные РИД")) else ""
-                                ugt = row.get("УГТ")
-                                if pd.isna(ugt):
+                                collective = str(row.get("Подразделение")) if not pd.isna(row.get("Подразделение")) else ""
+                                team = str(row.get("Команда")) if not pd.isna(row.get("Команда")) else ""
+                                publications = str(row.get("Публикации")) if not pd.isna(row.get("Публикации")) else ""
+                                grants = str(row.get("Гранты")) if not pd.isna(row.get("Гранты")) else ""
+                                niokr = str(row.get("НИОКР")) if not pd.isna(row.get("НИОКР")) else ""
+                                rid_protected = str(row.get("Охраняемые РИД")) if not pd.isna(row.get("Охраняемые РИД")) else ""
+                                rid_unprotected = str(row.get("Неоформленные РИД")) if not pd.isna(row.get("Неоформленные РИД")) else None
+                                ugt_str = row.get("УГТ")
+                                if pd.isna(ugt_str):
                                     ugt = 1
                                 else:
-                                    ugt_str = str(ugt)
-                                    match = re.search(r'\d+', ugt_str)
+                                    match = re.search(r'\d+', str(ugt_str))
                                     ugt = int(match.group()) if match else 1
-                                next_ugt_needs = row.get("Что нужно для следующего УГТ") if not pd.isna(row.get("Что нужно для следующего УГТ")) else ""
+                                next_ugt_needs = str(row.get("Что нужно для следующего УГТ")) if not pd.isna(row.get("Что нужно для следующего УГТ")) else ""
+                                
                                 new_zadel = Zadel(
                                     name=f"{grnti} {competence[:50]}" if grnti else competence[:100],
-                                    grnti=grnti, collective=collective_name, team=str(team), competencies=competence,
-                                    publications=str(publications), grants=str(grants), niokr=str(niokr),
-                                    rid_protected=str(rid_protected), rid_unprotected=str(rid_unprotected) if rid_unprotected else None,
-                                    ugt=ugt, next_ugt_needs=str(next_ugt_needs)
+                                    grnti=grnti,
+                                    collective=collective,
+                                    team=team,
+                                    competencies=competence,
+                                    publications=publications,
+                                    grants=grants,
+                                    niokr=niokr,
+                                    rid_protected=rid_protected,
+                                    rid_unprotected=rid_unprotected,
+                                    ugt=ugt,
+                                    next_ugt_needs=next_ugt_needs,
+                                    supervisor=supervisor,
+                                    department=department
                                 )
                                 session.add(new_zadel)
                                 session.flush()
@@ -898,28 +986,45 @@ elif page == "Импорт из Excel":
                                 zadel_cache[zadel_key] = existing_zadel.id
                         zadel_id = zadel_cache[zadel_key]
                         
-                        hypothesis_name = f"{org_name} – {zadel_id}"
-                        participation_type = "Заказчик"
+                        # ----- 3. Гипотеза (связка заказчик + задел) -----
+                        existing_hyp = session.query(Hypothesis).filter(
+                            Hypothesis.org_id == org_id,
+                            Hypothesis.zadel_id == zadel_id
+                        ).first()
+                        if existing_hyp:
+                            continue
+                        
+                        problem = str(row.get("Решаемая проблема")) if not pd.isna(row.get("Решаемая проблема")) else ""
+                        partner_name = str(row.get("Партнёр")) if not pd.isna(row.get("Партнёр")) else ""
+                        competitor = str(row.get("Конкурент")) if not pd.isna(row.get("Конкурент")) else ""
+                        advantage = str(row.get("Преимущество")) if not pd.isna(row.get("Преимущество")) else ""
                         miem_role = row.get("Роль МИЭМ")
-                        if pd.isna(miem_role):
-                            miem_role_id = None
-                        else:
-                            miem_role = str(miem_role).strip()
-                            role_obj = session.query(MiemRole).filter(MiemRole.name == miem_role).first()
+                        miem_role_id = None
+                        if not pd.isna(miem_role) and miem_role:
+                            role_obj = session.query(MiemRole).filter(MiemRole.name == str(miem_role).strip()).first()
                             miem_role_id = role_obj.id if role_obj else None
-                        competitor = row.get("Конкурент") if not pd.isna(row.get("Конкурент")) else ""
-                        advantage = row.get("Преимущество") if not pd.isna(row.get("Преимущество")) else ""
-                        horizon = row.get("Горизонт реализации") if not pd.isna(row.get("Горизонт реализации")) else ""
+                        horizon = str(row.get("Горизонт реализации")) if not pd.isna(row.get("Горизонт реализации")) else ""
                         status = "идентифицирована"
-                        responsible = row.get("Руководитель") if not pd.isna(row.get("Руководитель")) else ""
-                        budget = None
-                        docs_link = None
+                        responsible = str(row.get("Руководитель")) if not pd.isna(row.get("Руководитель")) else ""
+                        created_at = str(row.get("Дата")) if not pd.isna(row.get("Дата")) else str(date.today())
+                        
                         new_hyp = Hypothesis(
-                            name=hypothesis_name, org_id=org_id, participation_type=participation_type,
-                            miem_role_id=miem_role_id, zadel_id=zadel_id, ugt=ugt,
-                            competitor=str(competitor), advantage=str(advantage), budget=budget,
-                            horizon=str(horizon), status=status, responsible=str(responsible),
-                            docs_link=docs_link, created_at=str(date.today())
+                            name=f"{org_name} – {zadel_id}",
+                            org_id=org_id,
+                            participation_type="Заказчик",
+                            miem_role_id=miem_role_id,
+                            zadel_id=zadel_id,
+                            ugt=ugt,
+                            competitor=competitor,
+                            advantage=advantage,
+                            problem=problem,
+                            partner_name=partner_name,
+                            budget=None,
+                            horizon=horizon,
+                            status=status,
+                            responsible=responsible,
+                            docs_link=None,
+                            created_at=created_at
                         )
                         session.add(new_hyp)
                         session.flush()
@@ -931,12 +1036,7 @@ elif page == "Импорт из Excel":
                             for bname in barrier_names:
                                 barrier = session.query(Barrier).filter(Barrier.name == bname).first()
                                 if barrier:
-                                    existing_link = session.query(HypothesisBarrier).filter(
-                                        HypothesisBarrier.hypothesis_id == new_hyp.id,
-                                        HypothesisBarrier.barrier_id == barrier.id
-                                    ).first()
-                                    if not existing_link:
-                                        session.add(HypothesisBarrier(hypothesis_id=new_hyp.id, barrier_id=barrier.id))
+                                    session.add(HypothesisBarrier(hypothesis_id=new_hyp.id, barrier_id=barrier.id))
                     except Exception as e:
                         stats["errors"] += 1
                         st.error(f"Ошибка в строке {idx+2}: {str(e)}")
