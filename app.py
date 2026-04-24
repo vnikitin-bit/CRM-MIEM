@@ -4,7 +4,8 @@ import os
 from datetime import datetime
 
 st.set_page_config(page_title="CRM - Управление проектами", layout="wide")
-st.title("📋 Управление проектами (CRM)")DATA_FILE = "projects.xlsx"
+st.title("📋 Управление проектами (CRM)")
+DATA_FILE = "projects.xlsx"
 
 def load_data():
     """Загружает данные из Excel, фильтрует мусор, добавляет недостающие колонки."""
