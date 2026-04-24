@@ -201,7 +201,8 @@ elif page == "Дашборд":
         history = history.sort_values("stage_change_date", ascending=False).head(10)
         st.dataframe(history, hide_index=True, use_container_width=True)
     else:
-        st.info("Нет данных для отображения.")elif page == "Контрагенты":
+        st.info("Нет данных для отображения.")
+elif page == "Контрагенты":
     st.header("🏢 Контрагенты")
     st.info("Страница в разработке. Здесь будет список организаций.")
 
