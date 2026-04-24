@@ -4,8 +4,7 @@ import os
 from datetime import datetime
 
 st.set_page_config(page_title="CRM - Управление проектами", layout="wide")
-st.title("📋 Управление проектами (CRM)")
-DATA_FILE = "projects.xlsx"
+st.title("📋 Управление проектами (CRM)")DATA_FILE = "projects.xlsx"
 
 def load_data():
     """Загружает данные из Excel, фильтрует мусор, добавляет недостающие колонки."""
@@ -48,8 +47,7 @@ def save_data(df):
 
 def get_next_id(df):
     """Возвращает следующий доступный ID."""
-    return int(df["id"].max() + 1) if not df.empty else 1
-    # --- Боковая навигация ---
+    return int(df["id"].max() + 1) if not df.empty else 1# --- Боковая навигация ---
 st.sidebar.title("Навигация")
 page = st.sidebar.radio("Перейти", [
     "Дашборд", "Паспорта (проекты)", "Контрагенты", "Совместная деятельность", "Импорт из Excel"
@@ -202,8 +200,7 @@ elif page == "Дашборд":
         history = history.sort_values("stage_change_date", ascending=False).head(10)
         st.dataframe(history, hide_index=True, use_container_width=True)
     else:
-        st.info("Нет данных для отображения.")
-        elif page == "Контрагенты":
+        st.info("Нет данных для отображения.")elif page == "Контрагенты":
     st.header("🏢 Контрагенты")
     st.info("Страница в разработке. Здесь будет список организаций.")
 
