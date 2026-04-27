@@ -36,8 +36,12 @@ def load_data():
     if "department" not in df.columns:
         df["department"] = ""
 
+    # Приведение типов
     df["ugt"] = pd.to_numeric(df["ugt"], errors="coerce").fillna(4).astype(int)
     df["stage_change_date"] = pd.to_datetime(df["stage_change_date"], errors="coerce")
+    # Принудительно чистим этапы
+    valid_stages = ["Квалификация", "Формирование решения", "Переговоры", "Закрытие", "Внедрён / Завершён", "Отклонён"]
+    df["stage"] = df["stage"].apply(lambda x: x if x in valid_stages else "Квалификация")
     if not df.empty:
         df["id"] = df["id"].astype(int)
         df = df.sort_values("id").reset_index(drop=True)
@@ -232,79 +236,93 @@ elif page == "Импорт из Excel":
     if uploaded:
         try:
             xl = pd.ExcelFile(uploaded)
+            # Используем лист "Аналитика" или первый лист с данными
             sheet = "Аналитика" if "Аналитика" in xl.sheet_names else xl.sheet_names[0]
             df_raw = pd.read_excel(uploaded, sheet_name=sheet)
 
-            # Определяем колонки по русским названиям
-            col_map = {}
+            st.info(f"Найдено {len(df_raw)} строк в листе '{sheet}'. Будут созданы проекты на уникальных заказчиков.")
+
+            # Ищем колонки: "Название заказчика" и "Номер заказчика"
+            col_org = None
+            col_num = None
+            col_ugt = None
+            col_dept = None
             for col in df_raw.columns:
                 col_low = str(col).lower().strip()
                 if "название заказчика" in col_low:
-                    col_map["org"] = col   # организация
+                    col_org = col
                 elif "номер заказчика" in col_low:
-                    col_map["num"] = col   # номер заказчика
-                elif "подразделение" in col_low:
-                    col_map["dept"] = col
-                elif "тип проекта" in col_low:
-                    col_map["ptype"] = col
+                    col_num = col
                 elif "угт" in col_low:
-                    col_map["ugt"] = col
+                    col_ugt = col
+                elif "подразделение" in col_low:
+                    col_dept = col
 
-            if "org" not in col_map:
+            if col_org is None:
                 st.error("Не найдена колонка 'Название заказчика'.")
                 st.stop()
 
-            # Формируем name из номера и названия заказчика, если нет отдельного названия проекта
-            if "num" in col_map:
-                df_raw["_generated_name"] = df_raw[col_map["num"]].astype(str) + " – " + df_raw[col_map["org"]].astype(str)
-            else:
-                df_raw["_generated_name"] = df_raw[col_map["org"]]
+            # Группируем по названию заказчика
+            # Убираем строки, где название заказчика = "[вручную]" или пустое
+            df_filtered = df_raw[~df_raw[col_org].astype(str).str.contains(r"\[вручную\]", na=False, case=False)]
+            df_filtered = df_filtered[df_filtered[col_org].notna()]
+            df_filtered = df_filtered[df_filtered[col_org].astype(str).str.strip() != ""]
 
-            # Заполняем organization
-            df_raw["_organization"] = df_raw[col_map["org"]]
+            unique_orgs = df_filtered[col_org].unique()
+            st.warning(f"Уникальных заказчиков (без '[вручную]'): {len(unique_orgs)}. Будет создано {len(unique_orgs)} проектов.")
 
-            # Подразделение, тип, УГТ (опционально)
-            df_raw["_department"] = df_raw[col_map["dept"]] if "dept" in col_map else ""
-            df_raw["_project_type"] = df_raw[col_map["ptype"]] if "ptype" in col_map else "ОКР"
-            df_raw["_ugt"] = pd.to_numeric(df_raw[col_map["ugt"]] if "ugt" in col_map else 4, errors="coerce").fillna(4).astype(int)
+            if st.button("✅ Подтвердить импорт (один проект на заказчика)"):
+                current_df = load_data()
+                next_id = get_next_id(current_df)
+                imported = 0
+                for org_name in unique_orgs:
+                    # Берём первую строку для этого заказчика (для номера, УГТ, подразделения)
+                    first_row = df_filtered[df_filtered[col_org] == org_name].iloc[0]
+                    # Номер заказчика
+                    num_val = first_row[col_num] if col_num is not None else ""
+                    # Название проекта формируем как "Номер – Название заказчика"
+                    if pd.notna(num_val) and str(num_val).strip():
+                        proj_name = f"{num_val} – {org_name}"
+                    else:
+                        proj_name = org_name
+                    # УГТ
+                    ugt_val = 4
+                    if col_ugt is not None and pd.notna(first_row[col_ugt]):
+                        # В колонке УГТ может быть строка типа "УГТ 4 Лабораторная проверка"
+                        ugt_str = str(first_row[col_ugt])
+                        # Пытаемся извлечь число
+                        import re
+                        match = re.search(r"УГТ\s*(\d)", ugt_str, re.IGNORECASE)
+                        if match:
+                            ugt_val = int(match.group(1))
+                        else:
+                            # может быть просто число
+                            try:
+                                ugt_val = int(float(ugt_str))
+                            except:
+                                ugt_val = 4
+                    # Подразделение
+                    dept_val = first_row[col_dept] if col_dept is not None else ""
+                    if pd.isna(dept_val):
+                        dept_val = ""
 
-            # Берём нужные колонки
-            df_clean = pd.DataFrame({
-                "name": df_raw["_generated_name"],
-                "organization": df_raw["_organization"],
-                "department": df_raw["_department"],
-                "project_type": df_raw["_project_type"],
-                "ugt": df_raw["_ugt"]
-            })
+                    new_row = pd.DataFrame([{
+                        "id": next_id + imported,
+                        "name": proj_name,
+                        "organization": org_name,
+                        "department": dept_val,
+                        "project_type": "ОКР",  # по умолчанию, потом можно отредактировать
+                        "stage": "Квалификация",
+                        "ugt": ugt_val,
+                        "stage_change_reason": "Импорт из Excel (группировка по заказчику)",
+                        "stage_change_date": datetime.now()
+                    }])
+                    current_df = pd.concat([current_df, new_row], ignore_index=True)
+                    imported += 1
 
-            # Убираем записи с "[вручную]"
-            df_clean = df_clean[~df_clean["organization"].astype(str).str.contains(r"\[вручную\]", na=False, case=False)]
-
-            if df_clean.empty:
-                st.warning("Нет данных для импорта после фильтрации.")
-                st.stop()
-
-            current_df = load_data()
-            next_id = get_next_id(current_df)
-            imported = 0
-            for idx, row in df_clean.iterrows():
-                new_row = pd.DataFrame([{
-                    "id": next_id + idx,
-                    "name": row["name"],
-                    "organization": row["organization"],
-                    "department": row["department"],
-                    "project_type": row["project_type"],
-                    "stage": "Квалификация",
-                    "ugt": row["ugt"],
-                    "stage_change_reason": "Импорт из Excel",
-                    "stage_change_date": datetime.now()
-                }])
-                current_df = pd.concat([current_df, new_row], ignore_index=True)
-                imported += 1
-
-            save_data(current_df)
-            st.success(f"Импортировано {imported} проектов из листа '{sheet}'")
-            st.rerun()
+                save_data(current_df)
+                st.success(f"Импортировано {imported} проектов (по одному на уникального заказчика).")
+                st.rerun()
 
         except Exception as e:
             st.error(f"Ошибка: {e}")
