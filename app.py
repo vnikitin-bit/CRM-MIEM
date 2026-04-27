@@ -5,6 +5,7 @@ from datetime import datetime
 
 st.set_page_config(page_title="CRM - Управление проектами", layout="wide")
 st.title("📋 Управление проектами (CRM)")
+
 DATA_FILE = "projects.xlsx"
 
 def load_data():
@@ -50,7 +51,6 @@ def get_next_id(df):
     return int(df["id"].max() + 1) if not df.empty else 1
 
 def default_ugt_for_type(project_type):
-    """Возвращает начальный УГТ для типа проекта."""
     mapping = {
         "Грант / НИР": 1,
         "ОКР": 4,
@@ -59,20 +59,20 @@ def default_ugt_for_type(project_type):
         "Сервис": 8,
     }
     return mapping.get(project_type, 4)
-  # Боковая навигация
+
+# Боковая навигация
 st.sidebar.title("Навигация")
 page = st.sidebar.radio("Перейти", [
     "Дашборд", "Паспорта (проекты)", "Контрагенты", "Совместная деятельность", "Импорт из Excel"
 ])
 
-# Список типов проектов
 PROJECT_TYPES = ["Грант / НИР", "ОКР", "Внедрение", "Лицензия", "Сервис"]
+stage_options = ["Квалификация", "Формирование решения", "Переговоры", "Закрытие", "Внедрён / Завершён", "Отклонён"]
 
 if page == "Паспорта (проекты)":
     st.header("📌 Паспорта проектов")
     df = load_data()
 
-    # Таблица с нумерацией с 1
     st.subheader("Список проектов")
     if not df.empty:
         display_df = df.copy()
@@ -85,7 +85,6 @@ if page == "Паспорта (проекты)":
     else:
         st.info("Нет проектов.")
 
-    # Редактирование
     st.subheader("Редактирование проекта")
     ids = df["id"].tolist() if not df.empty else []
     if ids:
@@ -104,7 +103,6 @@ if page == "Паспорта (проекты)":
             name = st.text_input("Название проекта", value=project["name"])
             organization = st.text_input("Организация", value=project["organization"])
 
-            # Подразделение (безопасно)
             existing_depts = sorted(df["department"].dropna().unique())
             if existing_depts:
                 dept_options = ["(Выберите или введите новое)"] + existing_depts
@@ -120,19 +118,14 @@ if page == "Паспорта (проекты)":
             else:
                 department = st.text_input("Подразделение", value=project["department"])
 
-            # Тип проекта
             type_idx = PROJECT_TYPES.index(project["project_type"]) if project["project_type"] in PROJECT_TYPES else 1
             project_type = st.selectbox("Тип проекта", PROJECT_TYPES, index=type_idx)
 
-            # УГТ
             ugt = st.number_input("УГТ (1–9)", min_value=1, max_value=9, step=1, value=int(project["ugt"]))
 
-            # Этап сделки
-            stage_options = ["Квалификация", "Формирование решения", "Переговоры", "Закрытие", "Внедрён / Завершён", "Отклонён"]
             stage_idx = stage_options.index(project["stage"]) if project["stage"] in stage_options else 0
             new_stage = st.selectbox("Этап сделки", stage_options, index=stage_idx)
 
-            # История причины
             last_reason = project["stage_change_reason"] if pd.notna(project["stage_change_reason"]) else ""
             st.text_area("Последняя причина смены этапа", value=last_reason, disabled=True)
 
@@ -170,14 +163,12 @@ if page == "Паспорта (проекты)":
                 st.success("Удалено")
                 st.rerun()
 
-    # Создание нового проекта
     st.subheader("➕ Создать проект")
     with st.form(key="new_form"):
         new_name = st.text_input("Название проекта*")
         new_org = st.text_input("Организация*")
         new_dept = st.text_input("Подразделение")
-        new_type = st.selectbox("Тип проекта", PROJECT_TYPES, index=1)  # по умолчанию ОКР
-        # УГТ по умолчанию в зависимости от типа
+        new_type = st.selectbox("Тип проекта", PROJECT_TYPES, index=1)
         default_ugt = default_ugt_for_type(new_type)
         new_ugt = st.number_input("УГТ", min_value=1, max_value=9, value=default_ugt, step=1)
         new_stage = st.selectbox("Начальный этап", stage_options, index=0)
@@ -214,8 +205,7 @@ elif page == "Дашборд":
         col3.metric("Средний УГТ", round(df["ugt"].mean(), 1))
 
         st.subheader("Воронка по этапам")
-        stage_order = ["Квалификация", "Формирование решения", "Переговоры", "Закрытие", "Внедрён / Завершён", "Отклонён"]
-        stage_counts = df["stage"].value_counts().reindex(stage_order, fill_value=0)
+        stage_counts = df["stage"].value_counts().reindex(stage_options, fill_value=0)
         st.bar_chart(stage_counts)
 
         st.subheader("Распределение по типам проектов")
@@ -228,7 +218,8 @@ elif page == "Дашборд":
         st.dataframe(history, hide_index=True, use_container_width=True)
     else:
         st.info("Нет данных")
-       elif page == "Контрагенты":
+
+elif page == "Контрагенты":
     st.header("🏢 Контрагенты")
     st.info("Страница в разработке")
 
@@ -245,7 +236,6 @@ elif page == "Импорт из Excel":
             sheet = "Аналитика" if "Аналитика" in xl.sheet_names else xl.sheet_names[0]
             df_raw = pd.read_excel(uploaded, sheet_name=sheet)
 
-            # Сопоставление русских/английских колонок
             col_map = {}
             for col in df_raw.columns:
                 col_low = str(col).lower().strip()
@@ -264,7 +254,6 @@ elif page == "Импорт из Excel":
                 st.error("Не найдены колонки с названием проекта или организацией")
                 st.stop()
 
-            # Переименовываем
             df_renamed = df_raw.rename(columns={v: k for k, v in col_map.items()})
             needed = ["name", "organization"]
             if "department" in df_renamed.columns:
@@ -279,7 +268,6 @@ elif page == "Импорт из Excel":
             df_clean["project_type"] = df_clean.get("project_type", "ОКР").fillna("ОКР")
             df_clean["ugt"] = pd.to_numeric(df_clean.get("ugt", 4), errors="coerce").fillna(4).astype(int)
 
-            # Фильтр [вручную]
             df_clean = df_clean[~df_clean["organization"].astype(str).str.contains(r"\[вручную\]", na=False, case=False)]
 
             if df_clean.empty:
@@ -309,4 +297,4 @@ elif page == "Импорт из Excel":
             st.rerun()
 
         except Exception as e:
-            st.error(f"Ошибка: {e}")   
+            st.error(f"Ошибка: {e}")
