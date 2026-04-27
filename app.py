@@ -36,7 +36,6 @@ def load_data():
     if "department" not in df.columns:
         df["department"] = ""
 
-    # Приведение типов
     df["ugt"] = pd.to_numeric(df["ugt"], errors="coerce").fillna(4).astype(int)
     df["stage_change_date"] = pd.to_datetime(df["stage_change_date"], errors="coerce")
     if not df.empty:
@@ -67,7 +66,7 @@ page = st.sidebar.radio("Перейти", [
 ])
 
 PROJECT_TYPES = ["Грант / НИР", "ОКР", "Внедрение", "Лицензия", "Сервис"]
-stage_options = ["Квалификация", "Формирование решения", "Переговоры", "Закрытие", "Внедрён / Завершён", "Отклонён"]
+STAGE_OPTIONS = ["Квалификация", "Формирование решения", "Переговоры", "Закрытие", "Внедрён / Завершён", "Отклонён"]
 
 if page == "Паспорта (проекты)":
     st.header("📌 Паспорта проектов")
@@ -123,8 +122,8 @@ if page == "Паспорта (проекты)":
 
             ugt = st.number_input("УГТ (1–9)", min_value=1, max_value=9, step=1, value=int(project["ugt"]))
 
-            stage_idx = stage_options.index(project["stage"]) if project["stage"] in stage_options else 0
-            new_stage = st.selectbox("Этап сделки", stage_options, index=stage_idx)
+            stage_idx = STAGE_OPTIONS.index(project["stage"]) if project["stage"] in STAGE_OPTIONS else 0
+            new_stage = st.selectbox("Этап сделки", STAGE_OPTIONS, index=stage_idx)
 
             last_reason = project["stage_change_reason"] if pd.notna(project["stage_change_reason"]) else ""
             st.text_area("Последняя причина смены этапа", value=last_reason, disabled=True)
@@ -171,7 +170,7 @@ if page == "Паспорта (проекты)":
         new_type = st.selectbox("Тип проекта", PROJECT_TYPES, index=1)
         default_ugt = default_ugt_for_type(new_type)
         new_ugt = st.number_input("УГТ", min_value=1, max_value=9, value=default_ugt, step=1)
-        new_stage = st.selectbox("Начальный этап", stage_options, index=0)
+        new_stage = st.selectbox("Начальный этап", STAGE_OPTIONS, index=0)
         create = st.form_submit_button("Создать")
         if create:
             if new_name and new_org:
@@ -205,7 +204,7 @@ elif page == "Дашборд":
         col3.metric("Средний УГТ", round(df["ugt"].mean(), 1))
 
         st.subheader("Воронка по этапам")
-        stage_counts = df["stage"].value_counts().reindex(stage_options, fill_value=0)
+        stage_counts = df["stage"].value_counts().reindex(STAGE_OPTIONS, fill_value=0)
         st.bar_chart(stage_counts)
 
         st.subheader("Распределение по типам проектов")
@@ -236,42 +235,53 @@ elif page == "Импорт из Excel":
             sheet = "Аналитика" if "Аналитика" in xl.sheet_names else xl.sheet_names[0]
             df_raw = pd.read_excel(uploaded, sheet_name=sheet)
 
+            # Определяем колонки по русским названиям
             col_map = {}
             for col in df_raw.columns:
                 col_low = str(col).lower().strip()
-                if col_low in ["название заказчика", "name", "проект"]:
-                    col_map["name"] = col
-                elif col_low in ["организация", "заказчик", "organization", "клиент"]:
-                    col_map["organization"] = col
-                elif col_low in ["подразделение", "department"]:
-                    col_map["department"] = col
-                elif col_low in ["тип проекта", "project_type"]:
-                    col_map["project_type"] = col
-                elif col_low in ["угт", "ugt"]:
+                if "название заказчика" in col_low:
+                    col_map["org"] = col   # организация
+                elif "номер заказчика" in col_low:
+                    col_map["num"] = col   # номер заказчика
+                elif "подразделение" in col_low:
+                    col_map["dept"] = col
+                elif "тип проекта" in col_low:
+                    col_map["ptype"] = col
+                elif "угт" in col_low:
                     col_map["ugt"] = col
 
-            if "name" not in col_map or "organization" not in col_map:
-                st.error("Не найдены колонки с названием проекта или организацией")
+            if "org" not in col_map:
+                st.error("Не найдена колонка 'Название заказчика'.")
                 st.stop()
 
-            df_renamed = df_raw.rename(columns={v: k for k, v in col_map.items()})
-            needed = ["name", "organization"]
-            if "department" in df_renamed.columns:
-                needed.append("department")
-            if "project_type" in df_renamed.columns:
-                needed.append("project_type")
-            if "ugt" in df_renamed.columns:
-                needed.append("ugt")
+            # Формируем name из номера и названия заказчика, если нет отдельного названия проекта
+            if "num" in col_map:
+                df_raw["_generated_name"] = df_raw[col_map["num"]].astype(str) + " – " + df_raw[col_map["org"]].astype(str)
+            else:
+                df_raw["_generated_name"] = df_raw[col_map["org"]]
 
-            df_clean = df_renamed[needed].copy()
-            df_clean["department"] = df_clean.get("department", "").fillna("")
-            df_clean["project_type"] = df_clean.get("project_type", "ОКР").fillna("ОКР")
-            df_clean["ugt"] = pd.to_numeric(df_clean.get("ugt", 4), errors="coerce").fillna(4).astype(int)
+            # Заполняем organization
+            df_raw["_organization"] = df_raw[col_map["org"]]
 
+            # Подразделение, тип, УГТ (опционально)
+            df_raw["_department"] = df_raw[col_map["dept"]] if "dept" in col_map else ""
+            df_raw["_project_type"] = df_raw[col_map["ptype"]] if "ptype" in col_map else "ОКР"
+            df_raw["_ugt"] = pd.to_numeric(df_raw[col_map["ugt"]] if "ugt" in col_map else 4, errors="coerce").fillna(4).astype(int)
+
+            # Берём нужные колонки
+            df_clean = pd.DataFrame({
+                "name": df_raw["_generated_name"],
+                "organization": df_raw["_organization"],
+                "department": df_raw["_department"],
+                "project_type": df_raw["_project_type"],
+                "ugt": df_raw["_ugt"]
+            })
+
+            # Убираем записи с "[вручную]"
             df_clean = df_clean[~df_clean["organization"].astype(str).str.contains(r"\[вручную\]", na=False, case=False)]
 
             if df_clean.empty:
-                st.warning("Нет данных после фильтрации")
+                st.warning("Нет данных для импорта после фильтрации.")
                 st.stop()
 
             current_df = load_data()
