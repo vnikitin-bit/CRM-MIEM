@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
+import re
 from datetime import datetime
 
 st.set_page_config(page_title="CRM - Управление проектами", layout="wide")
@@ -36,10 +37,8 @@ def load_data():
     if "department" not in df.columns:
         df["department"] = ""
 
-    # Приведение типов
     df["ugt"] = pd.to_numeric(df["ugt"], errors="coerce").fillna(4).astype(int)
     df["stage_change_date"] = pd.to_datetime(df["stage_change_date"], errors="coerce")
-    # Принудительно чистим этапы
     valid_stages = ["Квалификация", "Формирование решения", "Переговоры", "Закрытие", "Внедрён / Завершён", "Отклонён"]
     df["stage"] = df["stage"].apply(lambda x: x if x in valid_stages else "Квалификация")
     if not df.empty:
@@ -68,6 +67,16 @@ st.sidebar.title("Навигация")
 page = st.sidebar.radio("Перейти", [
     "Дашборд", "Паспорта (проекты)", "Контрагенты", "Совместная деятельность", "Импорт из Excel"
 ])
+
+# Кнопка сброса (администрирование)
+with st.sidebar.expander("⚠️ Администрирование", expanded=False):
+    if st.button("🗑️ Сбросить все проекты (удалить projects.xlsx)"):
+        if os.path.exists(DATA_FILE):
+            os.remove(DATA_FILE)
+            st.success("Файл projects.xlsx удалён. Перезапустите приложение или обновите страницу.")
+            st.rerun()
+        else:
+            st.warning("Файл не найден. Возможно, база уже пуста.")
 
 PROJECT_TYPES = ["Грант / НИР", "ОКР", "Внедрение", "Лицензия", "Сервис"]
 STAGE_OPTIONS = ["Квалификация", "Формирование решения", "Переговоры", "Закрытие", "Внедрён / Завершён", "Отклонён"]
@@ -236,13 +245,11 @@ elif page == "Импорт из Excel":
     if uploaded:
         try:
             xl = pd.ExcelFile(uploaded)
-            # Используем лист "Аналитика" или первый лист с данными
             sheet = "Аналитика" if "Аналитика" in xl.sheet_names else xl.sheet_names[0]
             df_raw = pd.read_excel(uploaded, sheet_name=sheet)
 
             st.info(f"Найдено {len(df_raw)} строк в листе '{sheet}'. Будут созданы проекты на уникальных заказчиков.")
 
-            # Ищем колонки: "Название заказчика" и "Номер заказчика"
             col_org = None
             col_num = None
             col_ugt = None
@@ -262,8 +269,7 @@ elif page == "Импорт из Excel":
                 st.error("Не найдена колонка 'Название заказчика'.")
                 st.stop()
 
-            # Группируем по названию заказчика
-            # Убираем строки, где название заказчика = "[вручную]" или пустое
+            # Фильтрация пустых и [вручную]
             df_filtered = df_raw[~df_raw[col_org].astype(str).str.contains(r"\[вручную\]", na=False, case=False)]
             df_filtered = df_filtered[df_filtered[col_org].notna()]
             df_filtered = df_filtered[df_filtered[col_org].astype(str).str.strip() != ""]
@@ -276,32 +282,26 @@ elif page == "Импорт из Excel":
                 next_id = get_next_id(current_df)
                 imported = 0
                 for org_name in unique_orgs:
-                    # Берём первую строку для этого заказчика (для номера, УГТ, подразделения)
                     first_row = df_filtered[df_filtered[col_org] == org_name].iloc[0]
-                    # Номер заказчика
                     num_val = first_row[col_num] if col_num is not None else ""
-                    # Название проекта формируем как "Номер – Название заказчика"
                     if pd.notna(num_val) and str(num_val).strip():
                         proj_name = f"{num_val} – {org_name}"
                     else:
                         proj_name = org_name
-                    # УГТ
+
+                    # Извлечение УГТ из строки типа "УГТ 4 Лабораторная проверка"
                     ugt_val = 4
                     if col_ugt is not None and pd.notna(first_row[col_ugt]):
-                        # В колонке УГТ может быть строка типа "УГТ 4 Лабораторная проверка"
                         ugt_str = str(first_row[col_ugt])
-                        # Пытаемся извлечь число
-                        import re
                         match = re.search(r"УГТ\s*(\d)", ugt_str, re.IGNORECASE)
                         if match:
                             ugt_val = int(match.group(1))
                         else:
-                            # может быть просто число
                             try:
                                 ugt_val = int(float(ugt_str))
                             except:
-                                ugt_val = 4
-                    # Подразделение
+                                pass
+
                     dept_val = first_row[col_dept] if col_dept is not None else ""
                     if pd.isna(dept_val):
                         dept_val = ""
@@ -311,7 +311,7 @@ elif page == "Импорт из Excel":
                         "name": proj_name,
                         "organization": org_name,
                         "department": dept_val,
-                        "project_type": "ОКР",  # по умолчанию, потом можно отредактировать
+                        "project_type": "ОКР",
                         "stage": "Квалификация",
                         "ugt": ugt_val,
                         "stage_change_reason": "Импорт из Excel (группировка по заказчику)",
@@ -321,7 +321,7 @@ elif page == "Импорт из Excel":
                     imported += 1
 
                 save_data(current_df)
-                st.success(f"Импортировано {imported} проектов (по одному на уникального заказчика).")
+                st.success(f"Импортировано {imported} проектов.")
                 st.rerun()
 
         except Exception as e:
