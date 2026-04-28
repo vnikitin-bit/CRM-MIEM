@@ -5,7 +5,7 @@ from datetime import datetime
 import re
 
 st.set_page_config(page_title="CRM МИЭМ НАУКА", layout="wide")
-st.title("🏛️ CRM НИУ ВШЭ МИЭМ НАУКА — Управление научными проектами")
+st.title("🏛️ CRM НИУ ВШЭ МИЭМ НАУКА управление научными проектами")
 
 DATA_FILE = "projects.xlsx"
 
