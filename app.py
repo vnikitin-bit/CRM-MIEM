@@ -5,11 +5,15 @@ from datetime import datetime
 import re
 
 st.set_page_config(page_title="CRM МИЭМ НАУКА", layout="wide")
-import os
-if os.path.exists("projects.xlsx"):
-    os.remove("projects.xlsx")
-    st.warning("Файл projects.xlsx удалён. Удалите этот код после первого запуска.")
-st.title("🏛️ CRM МИЭМ НАУКА — Управление научными проектами")DATA_FILE = "projects.xlsx"
+st.title("🏛️ CRM МИЭМ НАУКА — Управление научными проектами")
+
+# ВРЕМЕННЫЙ БЛОК ДЛЯ ОЧИСТКИ СТАРЫХ ДАННЫХ (удалить или закомментировать после первого запуска)
+DATA_FILE = "projects.xlsx"
+if os.path.exists(DATA_FILE):
+    os.remove(DATA_FILE)
+    st.warning("Файл projects.xlsx удалён. Теперь можно импортировать или создавать новые проекты.")
+    # st.stop()  # если хотите остановить выполнение после удаления (раскомментировать)
+# КОНЕЦ ВРЕМЕННОГО БЛОКАDATA_FILE = "projects.xlsx"
 
 # Определяем все колонки, которые будут в Excel
 COLUMNS = [
