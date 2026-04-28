@@ -1,48 +1,41 @@
 import streamlit as st
 import pandas as pd
 import os
-import re
 from datetime import datetime
+import re
 
-st.set_page_config(page_title="CRM - Управление проектами", layout="wide")
-st.title("📋 Управление проектами (CRM)")
+st.set_page_config(page_title="CRM МИЭМ НАУКА", layout="wide")
+st.title("🏛️ CRM МИЭМ НАУКА — Управление научными проектами")DATA_FILE = "projects.xlsx"
 
-DATA_FILE = "projects.xlsx"
+# Определяем все колонки, которые будут в Excel
+COLUMNS = [
+    "id", "supervisor", "supervisor_competencies", "supervisor_publications", "supervisor_grants",
+    "project_name", "customer", "problem", "competitor", "advantage", "partner", "role_miem",
+    "barriers", "horizon", "ugt", "lifecycle_stage", "sales_stage", "department",
+    "stage_change_reason", "stage_change_date"
+]
 
 def load_data():
     if os.path.exists(DATA_FILE):
         df = pd.read_excel(DATA_FILE, dtype={"id": int})
     else:
-        df = pd.DataFrame(columns=[
-            "id", "name", "organization", "department", "project_type", "stage", "ugt",
-            "stage_change_reason", "stage_change_date"
-        ])
+        df = pd.DataFrame(columns=COLUMNS)
         df["id"] = df["id"].astype(int)
 
-    # Удаляем организацию "[вручную]"
-    df = df[~df["organization"].astype(str).str.contains(r"\[вручную\]", na=False, case=False)]
-    df = df.reset_index(drop=True)
-
-    # Добавляем недостающие колонки
-    if "project_type" not in df.columns:
-        df["project_type"] = "ОКР"
-    if "stage" not in df.columns:
-        df["stage"] = "Квалификация"
-    if "ugt" not in df.columns:
-        df["ugt"] = 4
-    if "stage_change_reason" not in df.columns:
-        df["stage_change_reason"] = ""
-    if "stage_change_date" not in df.columns:
-        df["stage_change_date"] = pd.NaT
-    if "department" not in df.columns:
-        df["department"] = ""
-
-    df["ugt"] = pd.to_numeric(df["ugt"], errors="coerce").fillna(4).astype(int)
+    # Добавляем недостающие колонки (если файл старый)
+    for col in COLUMNS:
+        if col not in df.columns:
+            df[col] = "" if col not in ["id", "ugt"] else (0 if col == "id" else 1)
+    # Приводим типы
+    df["id"] = df["id"].astype(int)
+    df["ugt"] = pd.to_numeric(df["ugt"], errors="coerce").fillna(1).astype(int)
     df["stage_change_date"] = pd.to_datetime(df["stage_change_date"], errors="coerce")
-    valid_stages = ["Квалификация", "Формирование решения", "Переговоры", "Закрытие", "Внедрён / Завершён", "Отклонён"]
-    df["stage"] = df["stage"].apply(lambda x: x if x in valid_stages else "Квалификация")
+    # Удаляем записи с пустым заказчиком или "[вручную]"
+    df = df[~df["customer"].astype(str).str.contains(r"\[вручную\]", na=False, case=False)]
+    df = df[df["customer"].notna() & (df["customer"].astype(str).str.strip() != "")]
+    df = df.reset_index(drop=True)
+    # Сортируем по id
     if not df.empty:
-        df["id"] = df["id"].astype(int)
         df = df.sort_values("id").reset_index(drop=True)
     return df
 
@@ -52,277 +45,196 @@ def save_data(df):
 def get_next_id(df):
     return int(df["id"].max() + 1) if not df.empty else 1
 
-def default_ugt_for_type(project_type):
-    mapping = {
-        "Грант / НИР": 1,
-        "ОКР": 4,
-        "Внедрение": 8,
-        "Лицензия": 8,
-        "Сервис": 8,
-    }
-    return mapping.get(project_type, 4)
+# Вспомогательные списки для выбора
+LIFECYCLE_STAGES = ["Планирование (НИР)", "Проектирование (ОКР)", "Разработка", "Внедрение", "Эксплуатация"]
+SALES_STAGES = ["Квалификация", "Выявление проблем", "Формирование видения", "Обоснование ценности",
+                "Проработка решения", "Презентация", "Переговоры и возражения", "Закрытие сделки",
+                "Поддержка и развитие"]
+ROLES_MIEM = ["Субподрядчик", "Соисполнитель", "Лицензиар", "Сервисный центр", "Технологический аудитор",
+              "Консультант", "Другая роль"]
+BARRIERS_LIST = ["Нет оформленных прав на РИД", "Нет прототипа в реальных условиях", "Нет подходящего партнёра",
+                 "Нет времени", "Нет исполнителей", "Нет понимания рынка", "Нет коммерческого потенциала",
+                 "Отсутствие инфраструктуры", "Другой барьер"]
+HORIZON_LIST = ["0-3 месяца", "3-6 месяцев", "6-12 месяцев", "1-3 года", "Другой срок"]st.sidebar.title("Навигация")
+page = st.sidebar.radio("Перейти", ["📋 Проекты", "👨‍🔬 Научные руководители", "📊 Дашборд"])
 
-# Боковая навигация
-st.sidebar.title("Навигация")
-page = st.sidebar.radio("Перейти", [
-    "Дашборд", "Паспорта (проекты)", "Контрагенты", "Совместная деятельность", "Импорт из Excel"
-])
-
-# Кнопка сброса (администрирование)
-with st.sidebar.expander("⚠️ Администрирование", expanded=False):
-    if st.button("🗑️ Сбросить все проекты (удалить projects.xlsx)"):
-        if os.path.exists(DATA_FILE):
-            os.remove(DATA_FILE)
-            st.success("Файл projects.xlsx удалён. Перезапустите приложение или обновите страницу.")
-            st.rerun()
-        else:
-            st.warning("Файл не найден. Возможно, база уже пуста.")
-
-PROJECT_TYPES = ["Грант / НИР", "ОКР", "Внедрение", "Лицензия", "Сервис"]
-STAGE_OPTIONS = ["Квалификация", "Формирование решения", "Переговоры", "Закрытие", "Внедрён / Завершён", "Отклонён"]
-
-if page == "Паспорта (проекты)":
-    st.header("📌 Паспорта проектов")
+if page == "📋 Проекты":
+    st.header("Проекты и заказчики")
     df = load_data()
 
-    st.subheader("Список проектов")
-    if not df.empty:
-        display_df = df.copy()
-        display_df.insert(0, "№", range(1, len(display_df)+1))
+    # Фильтры
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        supervisor_filter = st.selectbox("Научный руководитель", ["Все"] + sorted(df["supervisor"].dropna().unique().tolist()))
+    with col2:
+        ugt_filter = st.selectbox("УГТ", ["Все"] + sorted(df["ugt"].unique()))
+    with col3:
+        sales_filter = st.selectbox("Этап продаж", ["Все"] + SALES_STAGES)
+
+    filtered_df = df.copy()
+    if supervisor_filter != "Все":
+        filtered_df = filtered_df[filtered_df["supervisor"] == supervisor_filter]
+    if ugt_filter != "Все":
+        filtered_df = filtered_df[filtered_df["ugt"] == ugt_filter]
+    if sales_filter != "Все":
+        filtered_df = filtered_df[filtered_df["sales_stage"] == sales_filter]
+
+    st.subheader(f"Всего проектов: {len(filtered_df)}")
+    if not filtered_df.empty:
         st.dataframe(
-            display_df[["№", "name", "organization", "project_type", "stage", "ugt"]],
+            filtered_df[["id", "project_name", "customer", "supervisor", "ugt", "lifecycle_stage", "sales_stage"]],
             hide_index=True,
             use_container_width=True
         )
     else:
-        st.info("Нет проектов.")
+        st.info("Нет проектов по выбранным фильтрам")
 
-    st.subheader("Редактирование проекта")
-    ids = df["id"].tolist() if not df.empty else []
-    if ids:
-        selected_id = st.selectbox("Выберите ID проекта", ids, format_func=lambda x: f"ID {x}")
-    else:
-        selected_id = None
-        st.warning("Нет проектов для редактирования.")
-
-    if selected_id is not None:
-        project = df[df["id"] == selected_id].iloc[0]
-        original_stage = project["stage"]
-
-        with st.form(key="edit_form"):
-            st.subheader(f"✏️ Редактирование ID {selected_id}")
-
-            name = st.text_input("Название проекта", value=project["name"])
-            organization = st.text_input("Организация", value=project["organization"])
-
-            existing_depts = sorted(df["department"].dropna().unique())
-            if existing_depts:
-                dept_options = ["(Выберите или введите новое)"] + existing_depts
-                if project["department"] in existing_depts:
-                    default_idx = existing_depts.index(project["department"]) + 1
-                else:
-                    default_idx = 0
-                choice = st.selectbox("Подразделение", dept_options, index=default_idx)
-                if choice == "(Выберите или введите новое)":
-                    department = st.text_input("Новое подразделение", value=project["department"] if project["department"] not in existing_depts else "")
-                else:
-                    department = choice
-            else:
-                department = st.text_input("Подразделение", value=project["department"])
-
-            type_idx = PROJECT_TYPES.index(project["project_type"]) if project["project_type"] in PROJECT_TYPES else 1
-            project_type = st.selectbox("Тип проекта", PROJECT_TYPES, index=type_idx)
-
-            ugt = st.number_input("УГТ (1–9)", min_value=1, max_value=9, step=1, value=int(project["ugt"]))
-
-            stage_idx = STAGE_OPTIONS.index(project["stage"]) if project["stage"] in STAGE_OPTIONS else 0
-            new_stage = st.selectbox("Этап сделки", STAGE_OPTIONS, index=stage_idx)
-
-            last_reason = project["stage_change_reason"] if pd.notna(project["stage_change_reason"]) else ""
-            st.text_area("Последняя причина смены этапа", value=last_reason, disabled=True)
-
-            change_reason = ""
-            if new_stage != original_stage:
-                change_reason = st.text_area(f"Причина перехода на этап «{new_stage}»", placeholder="Обязательно для смены этапа", key="reason")
-
-            col1, col2 = st.columns(2)
-            submitted = col1.form_submit_button("💾 Сохранить")
-            delete = col2.form_submit_button("🗑️ Удалить")
-
-            if submitted:
-                if new_stage != original_stage and not change_reason.strip():
-                    st.error("При смене этапа необходимо указать причину.")
-                    st.stop()
-
-                df.loc[df["id"] == selected_id, "name"] = name
-                df.loc[df["id"] == selected_id, "organization"] = organization
-                df.loc[df["id"] == selected_id, "department"] = department
-                df.loc[df["id"] == selected_id, "project_type"] = project_type
-                df.loc[df["id"] == selected_id, "ugt"] = ugt
-
-                if new_stage != original_stage:
-                    df.loc[df["id"] == selected_id, "stage"] = new_stage
-                    df.loc[df["id"] == selected_id, "stage_change_reason"] = change_reason
-                    df.loc[df["id"] == selected_id, "stage_change_date"] = datetime.now()
-
-                save_data(df)
-                st.success("Сохранено")
-                st.rerun()
-
-            if delete:
-                df = df[df["id"] != selected_id]
-                save_data(df)
-                st.success("Удалено")
-                st.rerun()
-
-    st.subheader("➕ Создать проект")
-    with st.form(key="new_form"):
-        new_name = st.text_input("Название проекта*")
-        new_org = st.text_input("Организация*")
-        new_dept = st.text_input("Подразделение")
-        new_type = st.selectbox("Тип проекта", PROJECT_TYPES, index=1)
-        default_ugt = default_ugt_for_type(new_type)
-        new_ugt = st.number_input("УГТ", min_value=1, max_value=9, value=default_ugt, step=1)
-        new_stage = st.selectbox("Начальный этап", STAGE_OPTIONS, index=0)
-        create = st.form_submit_button("Создать")
-        if create:
-            if new_name and new_org:
+    # Редактирование / добавление
+    with st.expander("➕ Добавить новый проект"):
+        with st.form("new_project"):
+            sup = st.text_input("ФИО научного руководителя*")
+            proj = st.text_input("Название проекта*")
+            cust = st.text_input("Заказчик*")
+            prob = st.text_area("Решаемая проблема")
+            comp = st.text_input("Конкурент")
+            adv = st.text_input("Преимущество над конкурентом")
+            part = st.text_input("Партнёр")
+            role = st.selectbox("Роль МИЭМ в цепочке", [""] + ROLES_MIEM)
+            barr = st.selectbox("Барьеры", [""] + BARRIERS_LIST)
+            hor = st.selectbox("Горизонт реализации", [""] + HORIZON_LIST)
+            ugt = st.slider("УГТ", 1, 9, 4)
+            lc_stage = st.selectbox("Стадия ЖЦ продукта", LIFECYCLE_STAGES)
+            sales_stage = st.selectbox("Этап продаж (Solution Selling)", SALES_STAGES)
+            dept = st.text_input("Подразделение МИЭМ")
+            submitted = st.form_submit_button("Создать")
+            if submitted and sup and proj and cust:
                 new_id = get_next_id(df)
                 new_row = pd.DataFrame([{
-                    "id": new_id,
-                    "name": new_name,
-                    "organization": new_org,
-                    "department": new_dept,
-                    "project_type": new_type,
-                    "stage": new_stage,
-                    "ugt": new_ugt,
-                    "stage_change_reason": "Создание проекта",
-                    "stage_change_date": datetime.now()
+                    "id": new_id, "supervisor": sup, "supervisor_competencies": "", "supervisor_publications": "",
+                    "supervisor_grants": "", "project_name": proj, "customer": cust, "problem": prob,
+                    "competitor": comp, "advantage": adv, "partner": part, "role_miem": role,
+                    "barriers": barr, "horizon": hor, "ugt": ugt, "lifecycle_stage": lc_stage,
+                    "sales_stage": sales_stage, "department": dept,
+                    "stage_change_reason": "Создание проекта", "stage_change_date": datetime.now()
                 }])
                 df = pd.concat([df, new_row], ignore_index=True)
                 save_data(df)
-                st.success(f"Проект ID {new_id} создан")
+                st.success("Проект добавлен")
                 st.rerun()
-            else:
-                st.error("Название и организация обязательны")
+            elif submitted:
+                st.error("Заполните ФИО руководителя, название проекта и заказчика")
 
-elif page == "Дашборд":
-    st.header("📊 Дашборд")
-    df = load_data()
+    # Редактирование существующего
     if not df.empty:
+        with st.expander("✏️ Редактировать существующий проект"):
+            selected_id = st.selectbox("Выберите ID проекта", df["id"].tolist())
+            project = df[df["id"] == selected_id].iloc[0]
+            with st.form("edit_project"):
+                sup = st.text_input("ФИО научного руководителя", value=project["supervisor"])
+                proj = st.text_input("Название проекта", value=project["project_name"])
+                cust = st.text_input("Заказчик", value=project["customer"])
+                prob = st.text_area("Решаемая проблема", value=project["problem"])
+                comp = st.text_input("Конкурент", value=project["competitor"])
+                adv = st.text_input("Преимущество", value=project["advantage"])
+                part = st.text_input("Партнёр", value=project["partner"])
+                role = st.selectbox("Роль МИЭМ", ROLES_MIEM, index=ROLES_MIEM.index(project["role_miem"]) if project["role_miem"] in ROLES_MIEM else 0)
+                barr = st.selectbox("Барьеры", BARRIERS_LIST, index=BARRIERS_LIST.index(project["barriers"]) if project["barriers"] in BARRIERS_LIST else 0)
+                hor = st.selectbox("Горизонт реализации", HORIZON_LIST, index=HORIZON_LIST.index(project["horizon"]) if project["horizon"] in HORIZON_LIST else 0)
+                ugt = st.slider("УГТ", 1, 9, int(project["ugt"]))
+                lc_stage = st.selectbox("Стадия ЖЦ", LIFECYCLE_STAGES, index=LIFECYCLE_STAGES.index(project["lifecycle_stage"]) if project["lifecycle_stage"] in LIFECYCLE_STAGES else 0)
+                sales_stage = st.selectbox("Этап продаж", SALES_STAGES, index=SALES_STAGES.index(project["sales_stage"]) if project["sales_stage"] in SALES_STAGES else 0)
+                dept = st.text_input("Подразделение", value=project["department"])
+                col1, col2 = st.columns(2)
+                with col1:
+                    saved = st.form_submit_button("Сохранить")
+                with col2:
+                    deleted = st.form_submit_button("Удалить проект")
+                if saved:
+                    df.loc[df["id"] == selected_id, ["supervisor", "project_name", "customer", "problem", "competitor",
+                                                     "advantage", "partner", "role_miem", "barriers", "horizon", "ugt",
+                                                     "lifecycle_stage", "sales_stage", "department"]] = \
+                        [sup, proj, cust, prob, comp, adv, part, role, barr, hor, ugt, lc_stage, sales_stage, dept]
+                    df.loc[df["id"] == selected_id, "stage_change_date"] = datetime.now()
+                    df.loc[df["id"] == selected_id, "stage_change_reason"] = "Редактирование проекта"
+                    save_data(df)
+                    st.success("Сохранено")
+                    st.rerun()
+                if deleted:
+                    df = df[df["id"] != selected_id]
+                    save_data(df)
+                    st.success("Удалено")
+                    st.rerun()elif page == "👨‍🔬 Научные руководители":
+    st.header("Научные руководители и их проекты")
+    df = load_data()
+    if df.empty:
+        st.info("Нет данных. Добавьте проекты на вкладке 'Проекты'.")
+    else:
+        supervisors = df["supervisor"].dropna().unique()
+        selected_sup = st.selectbox("Выберите научного руководителя", supervisors)
+        sup_df = df[df["supervisor"] == selected_sup]
+        st.subheader(f"Проекты руководителя {selected_sup}")
+        # Краткая карточка с компетенциями (можно свободный текст, пока пусто)
+        with st.expander("Карточка руководителя (компетенции, гранты, публикации)"):
+            comp = st.text_area("Ключевые компетенции", value=sup_df.iloc[0]["supervisor_competencies"] if "supervisor_competencies" in sup_df.columns else "")
+            pubs = st.text_area("Публикации", value=sup_df.iloc[0]["supervisor_publications"] if "supervisor_publications" in sup_df.columns else "")
+            grants = st.text_area("Гранты", value=sup_df.iloc[0]["supervisor_grants"] if "supervisor_grants" in sup_df.columns else "")
+            if st.button("Сохранить информацию о руководителе"):
+                df.loc[df["supervisor"] == selected_sup, "supervisor_competencies"] = comp
+                df.loc[df["supervisor"] == selected_sup, "supervisor_publications"] = pubs
+                df.loc[df["supervisor"] == selected_sup, "supervisor_grants"] = grants
+                save_data(df)
+                st.success("Сохранено")
+        # Таблица проектов руководителя
+        st.dataframe(
+            sup_df[["project_name", "customer", "ugt", "lifecycle_stage", "sales_stage"]],
+            hide_index=True,
+            use_container_width=True
+        )
+        # Прогресс по УГТ (средний)
+        avg_ugt = sup_df["ugt"].mean()
+        st.subheader(f"Средний уровень УГТ по проектам: {avg_ugt:.1f}")
+        st.progress(avg_ugt / 9.0)
+        # Детализация по проектам
+        for _, row in sup_df.iterrows():
+            with st.expander(f"{row['project_name']} – {row['customer']} (УГТ {row['ugt']})"):
+                st.write(f"**Проблема:** {row['problem']}")
+                st.write(f"**Конкурент:** {row['competitor']} → **Преимущество:** {row['advantage']}")
+                st.write(f"**Партнёр:** {row['partner']} | **Роль МИЭМ:** {row['role_miem']}")
+                st.write(f"**Барьеры:** {row['barriers']} | **Горизонт:** {row['horizon']}")
+                st.write(f"**Стадия ЖЦ:** {row['lifecycle_stage']} | **Этап продаж:** {row['sales_stage']}")elif page == "📊 Дашборд":
+    st.header("Аналитика и воронка продаж")
+    df = load_data()
+    if df.empty:
+        st.info("Нет данных для анализа")
+    else:
         col1, col2, col3 = st.columns(3)
         col1.metric("Всего проектов", len(df))
-        active = len(df[~df["stage"].isin(["Внедрён / Завершён", "Отклонён"])])
-        col2.metric("Активных проектов", active)
-        col3.metric("Средний УГТ", round(df["ugt"].mean(), 1))
+        col2.metric("Средний УГТ", f"{df['ugt'].mean():.1f}")
+        col3.metric("Научных руководителей", df["supervisor"].nunique())
 
-        st.subheader("Воронка по этапам")
-        stage_counts = df["stage"].value_counts().reindex(STAGE_OPTIONS, fill_value=0)
-        st.bar_chart(stage_counts)
+        # Воронка продаж по этапам Solution Selling
+        st.subheader("Воронка продаж (этапы Solution Selling)")
+        sales_counts = df["sales_stage"].value_counts().reindex(SALES_STAGES, fill_value=0)
+        st.bar_chart(sales_counts)
 
-        st.subheader("Распределение по типам проектов")
-        type_counts = df["project_type"].value_counts()
-        st.bar_chart(type_counts)
+        # Распределение по УГТ
+        st.subheader("Распределение проектов по УГТ")
+        ugt_counts = df["ugt"].value_counts().sort_index()
+        st.bar_chart(ugt_counts)
 
-        st.subheader("📜 Цифровой след (последние изменения этапов)")
-        history = df[["name", "stage", "stage_change_date", "stage_change_reason"]].dropna(subset=["stage_change_date"])
-        history = history.sort_values("stage_change_date", ascending=False).head(10)
-        st.dataframe(history, hide_index=True, use_container_width=True)
-    else:
-        st.info("Нет данных")
+        # Распределение по стадиям жизненного цикла
+        st.subheader("Стадии жизненного цикла продукта")
+        lc_counts = df["lifecycle_stage"].value_counts().reindex(LIFECYCLE_STAGES, fill_value=0)
+        st.bar_chart(lc_counts)
 
-elif page == "Контрагенты":
-    st.header("🏢 Контрагенты")
-    st.info("Страница в разработке")
+        # Прогресс по руководителям (топ-5 по УГТ)
+        st.subheader("Топ-5 научных руководителей по среднему УГТ")
+        sup_ugt = df.groupby("supervisor")["ugt"].mean().sort_values(ascending=False).head(5)
+        st.dataframe(sup_ugt.reset_index(), hide_index=True, use_container_width=True)
 
-elif page == "Совместная деятельность":
-    st.header("🤝 Совместная деятельность")
-    st.info("Страница в разработке")
-
-elif page == "Импорт из Excel":
-    st.header("📂 Импорт из Excel")
-    uploaded = st.file_uploader("Загрузите Excel-файл", type=["xlsx"])
-    if uploaded:
-        try:
-            xl = pd.ExcelFile(uploaded)
-            sheet = "Аналитика" if "Аналитика" in xl.sheet_names else xl.sheet_names[0]
-            df_raw = pd.read_excel(uploaded, sheet_name=sheet)
-
-            st.info(f"Найдено {len(df_raw)} строк в листе '{sheet}'. Будут созданы проекты на уникальных заказчиков.")
-
-            col_org = None
-            col_num = None
-            col_ugt = None
-            col_dept = None
-            for col in df_raw.columns:
-                col_low = str(col).lower().strip()
-                if "название заказчика" in col_low:
-                    col_org = col
-                elif "номер заказчика" in col_low:
-                    col_num = col
-                elif "угт" in col_low:
-                    col_ugt = col
-                elif "подразделение" in col_low:
-                    col_dept = col
-
-            if col_org is None:
-                st.error("Не найдена колонка 'Название заказчика'.")
-                st.stop()
-
-            # Фильтрация пустых и [вручную]
-            df_filtered = df_raw[~df_raw[col_org].astype(str).str.contains(r"\[вручную\]", na=False, case=False)]
-            df_filtered = df_filtered[df_filtered[col_org].notna()]
-            df_filtered = df_filtered[df_filtered[col_org].astype(str).str.strip() != ""]
-
-            unique_orgs = df_filtered[col_org].unique()
-            st.warning(f"Уникальных заказчиков (без '[вручную]'): {len(unique_orgs)}. Будет создано {len(unique_orgs)} проектов.")
-
-            if st.button("✅ Подтвердить импорт (один проект на заказчика)"):
-                current_df = load_data()
-                next_id = get_next_id(current_df)
-                imported = 0
-                for org_name in unique_orgs:
-                    first_row = df_filtered[df_filtered[col_org] == org_name].iloc[0]
-                    num_val = first_row[col_num] if col_num is not None else ""
-                    if pd.notna(num_val) and str(num_val).strip():
-                        proj_name = f"{num_val} – {org_name}"
-                    else:
-                        proj_name = org_name
-
-                    # Извлечение УГТ из строки типа "УГТ 4 Лабораторная проверка"
-                    ugt_val = 4
-                    if col_ugt is not None and pd.notna(first_row[col_ugt]):
-                        ugt_str = str(first_row[col_ugt])
-                        match = re.search(r"УГТ\s*(\d)", ugt_str, re.IGNORECASE)
-                        if match:
-                            ugt_val = int(match.group(1))
-                        else:
-                            try:
-                                ugt_val = int(float(ugt_str))
-                            except:
-                                pass
-
-                    dept_val = first_row[col_dept] if col_dept is not None else ""
-                    if pd.isna(dept_val):
-                        dept_val = ""
-
-                    new_row = pd.DataFrame([{
-                        "id": next_id + imported,
-                        "name": proj_name,
-                        "organization": org_name,
-                        "department": dept_val,
-                        "project_type": "ОКР",
-                        "stage": "Квалификация",
-                        "ugt": ugt_val,
-                        "stage_change_reason": "Импорт из Excel (группировка по заказчику)",
-                        "stage_change_date": datetime.now()
-                    }])
-                    current_df = pd.concat([current_df, new_row], ignore_index=True)
-                    imported += 1
-
-                save_data(current_df)
-                st.success(f"Импортировано {imported} проектов.")
-                st.rerun()
-
-        except Exception as e:
-            st.error(f"Ошибка: {e}")
+        # Цифровой след (последние изменения)
+        st.subheader("Последние изменения проектов")
+        if "stage_change_date" in df.columns and not df["stage_change_date"].isna().all():
+            history = df[["project_name", "customer", "sales_stage", "stage_change_date", "stage_change_reason"]].dropna(subset=["stage_change_date"])
+            history = history.sort_values("stage_change_date", ascending=False).head(10)
+            st.dataframe(history, hide_index=True, use_container_width=True)
