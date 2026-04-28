@@ -5,6 +5,10 @@ from datetime import datetime
 import re
 
 st.set_page_config(page_title="CRM МИЭМ НАУКА", layout="wide")
+import os
+if os.path.exists("projects.xlsx"):
+    os.remove("projects.xlsx")
+    st.warning("Файл projects.xlsx удалён. Удалите этот код после первого запуска.")
 st.title("🏛️ CRM МИЭМ НАУКА — Управление научными проектами")DATA_FILE = "projects.xlsx"
 
 # Определяем все колонки, которые будут в Excel
