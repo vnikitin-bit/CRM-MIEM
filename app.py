@@ -3,6 +3,7 @@ import pandas as pd
 import os
 from datetime import datetime
 import re
+import io   # <-- добавлено для экспорта/импорта
 
 st.set_page_config(page_title="CRM МИЭМ НАУКА", layout="wide")
 st.title("🏛️ CRM МИЭМ НАУКА — Управление научными проектами")
@@ -69,7 +70,12 @@ HORIZON_LIST = ["0-3 месяца", "3-6 месяцев", "6-12 месяцев",
 
 # ---------- Боковая навигация ----------
 st.sidebar.title("Навигация")
-page = st.sidebar.radio("Перейти", ["📋 Проекты", "👨‍🔬 Научные руководители", "📊 Дашборд"])
+page = st.sidebar.radio("Перейти", [
+    "📋 Проекты", 
+    "👨‍🔬 Научные руководители", 
+    "📊 Дашборд",
+    "💾 Экспорт / Импорт"   # <-- новый пункт
+])
 
 # ---------- Страница "Проекты" ----------
 if page == "📋 Проекты":
@@ -260,3 +266,44 @@ elif page == "📊 Дашборд":
             history = df[["project_name", "customer", "sales_stage", "stage_change_date", "stage_change_reason"]].dropna(subset=["stage_change_date"])
             history = history.sort_values("stage_change_date", ascending=False).head(10)
             st.dataframe(history, hide_index=True, use_container_width=True)
+
+# ---------- Новая страница "Экспорт / Импорт" ----------
+elif page == "💾 Экспорт / Импорт":
+    st.header("Резервное копирование данных")
+    df = load_data()
+    
+    # Экспорт
+    st.subheader("📥 Скачать текущую базу")
+    if not df.empty:
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False)
+        st.download_button(
+            label="Скачать projects.xlsx",
+            data=output.getvalue(),
+            file_name="projects_backup.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    else:
+        st.warning("Нет данных для экспорта")
+    
+    st.divider()
+    
+    # Импорт
+    st.subheader("📤 Восстановить из файла")
+    uploaded = st.file_uploader("Загрузите ранее сохранённый файл .xlsx", type=["xlsx"])
+    if uploaded is not None:
+        try:
+            backup_df = pd.read_excel(uploaded)
+            # Проверка обязательных колонок
+            required_cols = ["id", "supervisor", "project_name", "customer", "ugt"]
+            if all(col in backup_df.columns for col in required_cols):
+                backup_df = backup_df.reset_index(drop=True)
+                # Пересохраняем как текущую базу
+                backup_df.to_excel(DATA_FILE, index=False)
+                st.success("База данных восстановлена! Перезагрузите страницу или перейдите в другие разделы.")
+                st.rerun()
+            else:
+                st.error("Файл не содержит необходимых колонок (id, supervisor, project_name, customer, ugt)")
+        except Exception as e:
+            st.error(f"Ошибка чтения файла: {e}")
