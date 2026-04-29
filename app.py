@@ -327,13 +327,13 @@ elif page == "💾 Экспорт / Импорт":
     df = load_data()
 
     # Экспорт
-    st.subheader("📥 Скачать текущую базу")
+    st.subheader("📥 Сохранить текущую базу")
     if not df.empty:
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False)
         st.download_button(
-            label="Скачать projects.xlsx",
+            label="Сохранить projects.xlsx",
             data=output.getvalue(),
             file_name="projects_backup.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
