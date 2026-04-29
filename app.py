@@ -3,7 +3,7 @@ import pandas as pd
 import os
 from datetime import datetime
 import re
-import io   # <-- добавлено для экспорта/импорта
+import io
 
 st.set_page_config(page_title="CRM МИЭМ НАУКА", layout="wide")
 st.title("🏛️ CRM МИЭМ НАУКА — Управление научными проектами")
@@ -25,7 +25,6 @@ def load_data():
         df = pd.DataFrame(columns=COLUMNS)
         df["id"] = df["id"].astype(int)
 
-    # Добавляем недостающие колонки
     for col in COLUMNS:
         if col not in df.columns:
             if col == "id":
@@ -34,7 +33,6 @@ def load_data():
                 df[col] = 1
             else:
                 df[col] = ""
-    # Приводим текстовые колонки к строковому типу
     text_cols = [col for col in COLUMNS if col not in ["id", "ugt", "stage_change_date"]]
     for col in text_cols:
         df[col] = df[col].fillna("").astype(str)
@@ -42,7 +40,6 @@ def load_data():
     df["ugt"] = pd.to_numeric(df["ugt"], errors="coerce").fillna(1).astype(int)
     if "stage_change_date" in df.columns:
         df["stage_change_date"] = pd.to_datetime(df["stage_change_date"], errors="coerce")
-    # Удаляем записи с пустым заказчиком или "[вручную]"
     df = df[~df["customer"].astype(str).str.contains(r"\[вручную\]", na=False, case=False)]
     df = df[df["customer"].notna() & (df["customer"].astype(str).str.strip() != "")]
     df = df.reset_index(drop=True)
@@ -70,12 +67,7 @@ HORIZON_LIST = ["0-3 месяца", "3-6 месяцев", "6-12 месяцев",
 
 # ---------- Боковая навигация ----------
 st.sidebar.title("Навигация")
-page = st.sidebar.radio("Перейти", [
-    "📋 Проекты", 
-    "👨‍🔬 Научные руководители", 
-    "📊 Дашборд",
-    "💾 Экспорт / Импорт"   # <-- новый пункт
-])
+page = st.sidebar.radio("Перейти", ["📋 Проекты", "👨‍🔬 Научные руководители", "📊 Дашборд", "💾 Экспорт / Импорт"])
 
 # ---------- Страница "Проекты" ----------
 if page == "📋 Проекты":
@@ -267,7 +259,7 @@ elif page == "📊 Дашборд":
             history = history.sort_values("stage_change_date", ascending=False).head(10)
             st.dataframe(history, hide_index=True, use_container_width=True)
 
-# ---------- Новая страница "Экспорт / Импорт" ----------
+# ---------- Страница "Экспорт / Импорт" ----------
 elif page == "💾 Экспорт / Импорт":
     st.header("Резервное копирование данных")
     df = load_data()
