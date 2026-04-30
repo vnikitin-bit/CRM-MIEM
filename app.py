@@ -7,25 +7,29 @@ import altair as alt
 import io
 
 st.set_page_config(page_title="CRM МИЭМ НАУКА", layout="wide")
+
+# Логотип (опционально: поставьте свой путь или удалите)
+# st.image("miem_logo.png", width=150)
+
 st.title("🏛️ CRM МИЭМ НАУКА — Управление научными проектами")
 
 DATA_FILE = "projects.xlsx"
 
-# ---------- КОЛОНКИ (обновлены) ----------
+# ---------- КОЛОНКИ ----------
 COLUMNS = [
     "id",
-    "supervisor",                     # ФИО научного руководителя
-    "supervisor_department",          # Подразделение МИЭМ (выпадающий список)
-    "supervisor_grnti",               # Шифр ГРНТИ
-    "supervisor_team",                # Команда (количество, состав, роли)
-    "supervisor_competencies",        # Ключевая компетенция
-    "supervisor_publications",        # Публикации (до 5)
-    "supervisor_grants",              # Гранты (фонд, период, объём)
-    "supervisor_niokr",               # Выполненные или идущие НИОКР
-    "supervisor_rid_protected",       # Охраняемые РИД
-    "supervisor_rid_unprotected",     # Неоформленные РИД (выбрать)
-    "supervisor_ugt",                 # УГТ задела научной группы (1-9)
-    "supervisor_next_ugt",            # Что нужно для следующего УГТ
+    "supervisor",
+    "supervisor_department",
+    "supervisor_grnti",
+    "supervisor_team",
+    "supervisor_competencies",
+    "supervisor_publications",
+    "supervisor_grants",
+    "supervisor_niokr",
+    "supervisor_rid_protected",
+    "supervisor_rid_unprotected",
+    "supervisor_ugt",
+    "supervisor_next_ugt",
     "project_name",
     "customer",
     "problem",
@@ -41,7 +45,7 @@ COLUMNS = [
     "stage_change_date"
 ]
 
-# ---------- ФУНКЦИИ РАБОТЫ С ДАННЫМИ ----------
+# ---------- ФУНКЦИИ ----------
 def load_data():
     if os.path.exists(DATA_FILE):
         df = pd.read_excel(DATA_FILE, dtype={"id": int})
@@ -49,7 +53,6 @@ def load_data():
         df = pd.DataFrame(columns=COLUMNS)
         df["id"] = df["id"].astype(int)
 
-    # Добавляем недостающие колонки (миграция)
     for col in COLUMNS:
         if col not in df.columns:
             if col == "id":
@@ -58,8 +61,6 @@ def load_data():
                 df[col] = 1
             else:
                 df[col] = ""
-
-    # Приводим текстовые колонки к строкам
     text_cols = [col for col in COLUMNS if col not in ["id", "supervisor_ugt", "stage_change_date"]]
     for col in text_cols:
         df[col] = df[col].fillna("").astype(str)
@@ -67,7 +68,7 @@ def load_data():
     df["supervisor_ugt"] = pd.to_numeric(df["supervisor_ugt"], errors="coerce").fillna(1).astype(int)
     if "stage_change_date" in df.columns:
         df["stage_change_date"] = pd.to_datetime(df["stage_change_date"], errors="coerce")
-    # Удаляем записи с пустым заказчиком или "[вручную]"
+    # Фильтр мусора
     df = df[~df["customer"].astype(str).str.contains(r"\[вручную\]", na=False, case=False)]
     df = df[df["customer"].notna() & (df["customer"].astype(str).str.strip() != "")]
     df = df.reset_index(drop=True)
@@ -81,7 +82,7 @@ def save_data(df):
 def get_next_id(df):
     return int(df["id"].max() + 1) if not df.empty else 1
 
-# ---------- СПИСКИ ДЛЯ ВЫБОРА (из файла шаблона) ----------
+# ---------- СПИСКИ ----------
 LIFECYCLE_STAGES = ["Планирование (НИР)", "Проектирование (ОКР)", "Разработка", "Внедрение", "Эксплуатация"]
 SALES_STAGES = [
     "Квалификация", "Выявление проблем", "Формирование видения",
@@ -94,41 +95,28 @@ HORIZON_LIST = ["0-3 месяца", "3-6 месяцев", "6-12 месяцев",
 FUNDING_SOURCES = ["Внутренний (грант ВШЭ/МИЭМ)", "Внешний институциональный (РНФ, РФФИ, Минобр)",
                    "Внешний корпоративный (компания)", "Смешанный", "Другое"]
 
-# Списки из листа "Списки" (по данным файла)
 UNPROTECTED_RID_LIST = [
     "Алгоритмы/методы", "ПО", "КД", "Прототип", "Ноу-хау",
     "Публикации с тех. описанием", "Технология", "Бизнес-модель", "Другой неоф. РИД"
 ]
 DEPARTMENT_LIST = [
-    "Центр квантовых метаматериалов",
-    "Международная лаборатория физики элементарных частиц",
-    "Научно-технический центр прикладной электроники",
-    "Научно-учебная лаборатория квантовой наноэлектроники",
-    "Научно-учебная лаборатория телекоммуникационных систем",
-    "Научная лаборатория Интернета вещей и киберфизических систем",
+    "Центр квантовых метаматериалов", "Международная лаборатория физики элементарных частиц",
+    "Научно-технический центр прикладной электроники", "Научно-учебная лаборатория квантовой наноэлектроники",
+    "Научно-учебная лаборатория телекоммуникационных систем", "Научная лаборатория Интернета вещей и киберфизических систем",
     "Учебно-исследовательская лаборатория функциональной безопасности космических аппаратов и систем",
-    "Лаборатория «Математические методы естествознания»",
-    "Лаборатория вычислительной физики",
-    "Лаборатория динамических систем и приложений",
-    "Учебно-исследовательская лаборатория Интернет технологий и сервисов",
-    "Учебная лаборатория 3Д-визуализации и компьютерной графики",
-    "Учебная лаборатория элементов и устройств встраиваемых систем",
-    "Учебная лаборатория систем автоматизированного проектирования",
-    "Учебная лаборатория сетевых технологий",
-    "Учебная лаборатория сетевых видеотехнологий",
-    "Учебная лаборатория моделирования систем защиты информации и криптографии",
-    "Учебная лаборатория общей и квантовой физики",
-    "Учебная лаборатория квантовых технологий",
-    "Учебная лаборатория метрологии и измерительных технологий",
-    "Учебная лаборатория надежности электронных средств киберфизических систем",
+    "Лаборатория «Математические методы естествознания»", "Лаборатория вычислительной физики",
+    "Лаборатория динамических систем и приложений", "Учебно-исследовательская лаборатория Интернет технологий и сервисов",
+    "Учебная лаборатория 3Д-визуализации и компьютерной графики", "Учебная лаборатория элементов и устройств встраиваемых систем",
+    "Учебная лаборатория систем автоматизированного проектирования", "Учебная лаборатория сетевых технологий",
+    "Учебная лаборатория сетевых видеотехнологий", "Учебная лаборатория моделирования систем защиты информации и криптографии",
+    "Учебная лаборатория общей и квантовой физики", "Учебная лаборатория квантовых технологий",
+    "Учебная лаборатория метрологии и измерительных технологий", "Учебная лаборатория надежности электронных средств киберфизических систем",
     "Учебная лаборатория моделирования и проектирования электронных компонентов и устройств",
-    "Учебная лаборатория микроволновой и оптоэлектронной инженерии",
-    "Учебная лаборатория телекоммуникационных технологий и систем связи",
-    "Учебная лаборатория электроники и схемотехники",
-    "Другое"
+    "Учебная лаборатория микроволновой и оптоэлектронной инженерии", "Учебная лаборатория телекоммуникационных технологий и систем связи",
+    "Учебная лаборатория электроники и схемотехники", "Другое"
 ]
 
-# ---------- НАВИГАЦИЯ (новый порядок) ----------
+# ---------- САЙДБАР С ДОП. КНОПКОЙ ЭКСПОРТА ----------
 st.sidebar.title("Навигация")
 page = st.sidebar.radio("Перейти", [
     "👨‍🔬 Научные руководители",
@@ -137,60 +125,55 @@ page = st.sidebar.radio("Перейти", [
     "💾 Экспорт / Импорт"
 ])
 
-# ---------- СТРАНИЦА "НАУЧНЫЕ РУКОВОДИТЕЛИ" (карточка в порядке шаблона) ----------
+# Быстрый экспорт из сайдбара (на всякий случай)
+st.sidebar.markdown("---")
+st.sidebar.markdown("**Резервная копия**")
+if st.sidebar.button("📥 Скачать бэкап (Excel)", key="sidebar_export"):
+    df = load_data()
+    if not df.empty:
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False)
+        st.sidebar.download_button(
+            label="Сохранить файл",
+            data=output.getvalue(),
+            file_name="projects_backup_quick.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    else:
+        st.sidebar.warning("Нет данных")
+
+# ---------- СТРАНИЦА "НАУЧНЫЕ РУКОВОДИТЕЛИ" ----------
 if page == "👨‍🔬 Научные руководители":
     st.header("Научные руководители и их проекты")
     df = load_data()
     if df.empty:
-        st.info("Нет данных. Добавьте проекты на вкладке 'Проекты'.")
+        st.info("Нет данных. Создайте первый проект на вкладке 'Проекты' или импортируйте данные.")
     else:
-        supervisors = df["supervisor"].dropna().unique()
+        supervisors = sorted(df["supervisor"].dropna().unique())
         selected_sup = st.selectbox("Выберите научного руководителя", supervisors)
         sup_df = df[df["supervisor"] == selected_sup]
         st.subheader(f"Проекты руководителя {selected_sup}")
 
         with st.expander("📋 Карточка научного руководителя (задел)"):
-            # Поля в порядке шаблона (A4-A14 + дополнительные)
-            # ФИО (уже выбрано)
+            # Поля в порядке шаблона
             st.text_input("ФИО научного руководителя", value=selected_sup, disabled=True)
-
-            # Подразделение МИЭМ (выпадающий список)
             current_dept = sup_df.iloc[0]["supervisor_department"] if "supervisor_department" in sup_df.columns else ""
             dept_idx = DEPARTMENT_LIST.index(current_dept) if current_dept in DEPARTMENT_LIST else 0
             department = st.selectbox("Подразделение МИЭМ (выбрать)", DEPARTMENT_LIST, index=dept_idx)
 
-            # Научное направление (шифр ГРНТИ)
-            grnti = st.text_input("Научное направление (шифр ГРНТИ)", value=sup_df.iloc[0]["supervisor_grnti"] if "supervisor_grnti" in sup_df.columns else "")
-
-            # Команда (количество, состав, ФИО)
-            team = st.text_area("Команда (количество, состав, ФИО основных штатных участников)", value=sup_df.iloc[0]["supervisor_team"] if "supervisor_team" in sup_df.columns else "")
-
-            # Ключевая компетенция
-            comp = st.text_area("Ключевая компетенция", value=sup_df.iloc[0]["supervisor_competencies"] if "supervisor_competencies" in sup_df.columns else "")
-
-            # Публикации (до 5)
-            pubs = st.text_area("Публикации (до 5)", value=sup_df.iloc[0]["supervisor_publications"] if "supervisor_publications" in sup_df.columns else "")
-
-            # Гранты (фонд, период, объём)
-            grants = st.text_area("Гранты (фонд, период, объём)", value=sup_df.iloc[0]["supervisor_grants"] if "supervisor_grants" in sup_df.columns else "")
-
-            # Выполненные или идущие НИОКР
-            niokr = st.text_area("Выполненные или идущие НИОКР", value=sup_df.iloc[0]["supervisor_niokr"] if "supervisor_niokr" in sup_df.columns else "")
-
-            # Охраняемые РИД
-            rid_protected = st.text_area("Охраняемые РИД", value=sup_df.iloc[0]["supervisor_rid_protected"] if "supervisor_rid_protected" in sup_df.columns else "")
-
-            # Неоформленные РИД (выпадающий список)
+            grnti = st.text_input("Научное направление (шифр ГРНТИ)", value=sup_df.iloc[0]["supervisor_grnti"])
+            team = st.text_area("Команда (количество, состав, ФИО)", value=sup_df.iloc[0]["supervisor_team"])
+            comp = st.text_area("Ключевая компетенция", value=sup_df.iloc[0]["supervisor_competencies"])
+            pubs = st.text_area("Публикации (до 5)", value=sup_df.iloc[0]["supervisor_publications"])
+            grants = st.text_area("Гранты (фонд, период, объём)", value=sup_df.iloc[0]["supervisor_grants"])
+            niokr = st.text_area("Выполненные или идущие НИОКР", value=sup_df.iloc[0]["supervisor_niokr"])
+            rid_protected = st.text_area("Охраняемые РИД", value=sup_df.iloc[0]["supervisor_rid_protected"])
             current_unprot = sup_df.iloc[0]["supervisor_rid_unprotected"] if "supervisor_rid_unprotected" in sup_df.columns else ""
             unprot_idx = UNPROTECTED_RID_LIST.index(current_unprot) if current_unprot in UNPROTECTED_RID_LIST else 0
             rid_unprotected = st.selectbox("Неоформленные РИД (выбрать)", UNPROTECTED_RID_LIST, index=unprot_idx)
-
-            # УГТ задела научной группы (выбрать) – слайдер 1-9
-            current_ugt = sup_df.iloc[0]["supervisor_ugt"] if "supervisor_ugt" in sup_df.columns else 1
-            ugt = st.slider("УГТ задела научной группы (выбрать)", 1, 9, value=int(current_ugt))
-
-            # Что нужно для следующего УГТ
-            next_ugt = st.text_area("Что нужно для следующего УГТ", value=sup_df.iloc[0]["supervisor_next_ugt"] if "supervisor_next_ugt" in sup_df.columns else "")
+            ugt = st.slider("УГТ задела научной группы (выбрать)", 1, 9, value=int(sup_df.iloc[0]["supervisor_ugt"]))
+            next_ugt = st.text_area("Что нужно для следующего УГТ", value=sup_df.iloc[0]["supervisor_next_ugt"])
 
             if st.button("Сохранить данные руководителя"):
                 mask = df["supervisor"] == selected_sup
@@ -207,85 +190,81 @@ if page == "👨‍🔬 Научные руководители":
                     df.loc[mask, "supervisor_ugt"] = ugt
                     df.loc[mask, "supervisor_next_ugt"] = next_ugt
                     save_data(df)
-                    st.success("Данные руководителя сохранены")
+                    st.success("Данные сохранены")
                     st.rerun()
-                else:
-                    st.error("Руководитель не найден")
 
-        # Таблица проектов руководителя (русские заголовки)
+        # Таблица проектов с УГТ задела
         st.subheader("Проекты руководителя")
         if not sup_df.empty:
-            display_df = sup_df[["project_name", "customer", "lifecycle_stage", "sales_stage", "funding_source"]].copy()
-            display_df.columns = ["Название проекта", "Заказчик", "Стадия ЖЦ продукта", "Этап продвижения", "Источник финансирования"]
-            st.dataframe(display_df, hide_index=True, use_container_width=True)
+            proj_table = sup_df[["project_name", "customer", "lifecycle_stage", "sales_stage", "funding_source"]].copy()
+            proj_table.columns = ["Название проекта", "Заказчик", "Стадия ЖЦ", "Этап продвижения", "Источник финансирования"]
+            st.dataframe(proj_table, hide_index=True, use_container_width=True)
 
-        # Прогресс УГТ задела
-        current_ugt_val = sup_df.iloc[0]["supervisor_ugt"] if "supervisor_ugt" in sup_df.columns else 1
+        current_ugt_val = sup_df.iloc[0]["supervisor_ugt"]
         st.subheader(f"УГТ задела научной группы: {current_ugt_val}")
         st.progress(current_ugt_val / 9.0)
+        next_info = sup_df.iloc[0]["supervisor_next_ugt"]
+        if next_info:
+            st.caption(f"📌 Что нужно для следующего УГТ: {next_info}")
 
-        # Детализация проектов
         for _, row in sup_df.iterrows():
             with st.expander(f"{row['project_name']} – {row['customer']}"):
                 st.write(f"**Решаемая проблема:** {row['problem']}")
                 st.write(f"**Конкурент:** {row['competitor']} → **Преимущество:** {row['advantage']}")
                 st.write(f"**Партнёр:** {row['partner']} | **Роль МИЭМ:** {row['role_miem']}")
-                st.write(f"**Горизонт реализации:** {row['horizon']} | **Источник финансирования:** {row['funding_source']}")
-                st.write(f"**Стадия ЖЦ продукта:** {row['lifecycle_stage']} | **Этап продвижения:** {row['sales_stage']}")
+                st.write(f"**Горизонт:** {row['horizon']} | **Источник финансирования:** {row['funding_source']}")
+                st.write(f"**Стадия ЖЦ:** {row['lifecycle_stage']} | **Этап продвижения:** {row['sales_stage']}")
 
-# ---------- СТРАНИЦА "ПРОЕКТЫ" (без поля подразделения) ----------
+# ---------- СТРАНИЦА "ПРОЕКТЫ" (с добавленной колонкой УГТ задела) ----------
 elif page == "📋 Проекты":
     st.header("Проекты и заказчики")
     df = load_data()
-
-    # Фильтры
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        supervisor_filter = st.selectbox("Научный руководитель", ["Все"] + sorted(df["supervisor"].dropna().unique().tolist()) if not df.empty else ["Все"])
-    with col2:
-        sales_filter = st.selectbox("Этап продвижения", ["Все"] + SALES_STAGES)
-    with col3:
-        lc_filter = st.selectbox("Стадия ЖЦ", ["Все"] + LIFECYCLE_STAGES)
-
-    filtered_df = df.copy()
-    if supervisor_filter != "Все" and not df.empty:
-        filtered_df = filtered_df[filtered_df["supervisor"] == supervisor_filter]
-    if sales_filter != "Все" and not df.empty:
-        filtered_df = filtered_df[filtered_df["sales_stage"] == sales_filter]
-    if lc_filter != "Все" and not df.empty:
-        filtered_df = filtered_df[filtered_df["lifecycle_stage"] == lc_filter]
-
-    st.subheader(f"Всего проектов: {len(filtered_df)}")
-    if not filtered_df.empty:
-        display_df = filtered_df[["project_name", "customer", "supervisor", "lifecycle_stage", "sales_stage", "funding_source"]].copy()
-        display_df.columns = ["Название проекта", "Заказчик", "Научный руководитель", "Стадия ЖЦ продукта", "Этап продвижения", "Источник финансирования"]
-        st.dataframe(display_df, hide_index=True, use_container_width=True)
+    if df.empty:
+        st.info("Нет проектов. Добавьте первый через форму ниже.")
     else:
-        st.info("Нет проектов по выбранным фильтрам")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            sup_filter = st.selectbox("Научный руководитель", ["Все"] + sorted(df["supervisor"].dropna().unique()))
+        with col2:
+            sales_filter = st.selectbox("Этап продвижения", ["Все"] + SALES_STAGES)
+        with col3:
+            lc_filter = st.selectbox("Стадия ЖЦ", ["Все"] + LIFECYCLE_STAGES)
 
-    # Добавление нового проекта
+        filtered = df.copy()
+        if sup_filter != "Все":
+            filtered = filtered[filtered["supervisor"] == sup_filter]
+        if sales_filter != "Все":
+            filtered = filtered[filtered["sales_stage"] == sales_filter]
+        if lc_filter != "Все":
+            filtered = filtered[filtered["lifecycle_stage"] == lc_filter]
+
+        st.subheader(f"Всего проектов: {len(filtered)}")
+        if not filtered.empty:
+            display = filtered[["project_name", "customer", "supervisor", "supervisor_ugt", "lifecycle_stage", "sales_stage", "funding_source"]].copy()
+            display.columns = ["Название проекта", "Заказчик", "Научный руководитель", "УГТ задела", "Стадия ЖЦ", "Этап продвижения", "Источник финансирования"]
+            st.dataframe(display, hide_index=True, use_container_width=True)
+
+    # Добавление нового проекта (без подразделения)
     with st.expander("➕ Добавить новый проект"):
         with st.form("new_project"):
             sup = st.text_input("ФИО научного руководителя*")
             proj = st.text_input("Название проекта*")
             cust = st.text_input("Заказчик*")
-            prob = st.text_area("Решаемая проблема заказчика")
+            prob = st.text_area("Решаемая проблема")
             comp = st.text_input("Конкурент")
-            adv = st.text_input("Преимущество над конкурентом")
+            adv = st.text_input("Преимущество")
             part = st.text_input("Партнёр")
-            role = st.selectbox("Роль МИЭМ в цепочке", [""] + ROLES_MIEM)
+            role = st.selectbox("Роль МИЭМ", [""] + ROLES_MIEM)
             hor = st.selectbox("Горизонт реализации", [""] + HORIZON_LIST)
-            funding = st.selectbox("Источник финансирования проекта", FUNDING_SOURCES)
-            lc_stage = st.selectbox("Стадия ЖЦ продукта", LIFECYCLE_STAGES)
-            sales_stage = st.selectbox("Этап продвижения", SALES_STAGES)
+            funding = st.selectbox("Источник финансирования", FUNDING_SOURCES)
+            lc = st.selectbox("Стадия ЖЦ", LIFECYCLE_STAGES)
+            sales = st.selectbox("Этап продвижения", SALES_STAGES)
             submitted = st.form_submit_button("Создать")
             if submitted:
                 if sup and proj and cust:
                     new_id = get_next_id(df)
                     new_row = pd.DataFrame([{
-                        "id": new_id,
-                        "supervisor": sup,
-                        # значения для руководителя будут заполнены позже в карточке
+                        "id": new_id, "supervisor": sup,
                         "supervisor_department": "", "supervisor_grnti": "", "supervisor_team": "",
                         "supervisor_competencies": "", "supervisor_publications": "", "supervisor_grants": "",
                         "supervisor_niokr": "", "supervisor_rid_protected": "", "supervisor_rid_unprotected": "",
@@ -293,7 +272,7 @@ elif page == "📋 Проекты":
                         "project_name": proj, "customer": cust, "problem": prob,
                         "competitor": comp, "advantage": adv, "partner": part, "role_miem": role,
                         "horizon": hor, "funding_source": funding,
-                        "lifecycle_stage": lc_stage, "sales_stage": sales_stage,
+                        "lifecycle_stage": lc, "sales_stage": sales,
                         "stage_change_reason": "Создание проекта", "stage_change_date": datetime.now()
                     }])
                     df = pd.concat([df, new_row], ignore_index=True)
@@ -301,43 +280,41 @@ elif page == "📋 Проекты":
                     st.success("Проект добавлен")
                     st.rerun()
                 else:
-                    st.error("Заполните ФИО руководителя, название проекта и заказчика")
+                    st.error("Заполните все поля со звёздочкой")
 
-    # Редактирование существующего проекта
+    # Редактирование
     if not df.empty:
-        with st.expander("✏️ Редактировать существующий проект"):
-            selected_id = st.selectbox("Выберите ID проекта", df["id"].tolist())
-            project = df[df["id"] == selected_id].iloc[0]
+        with st.expander("✏️ Редактировать проект"):
+            sel_id = st.selectbox("ID проекта", df["id"].tolist())
+            proj = df[df["id"] == sel_id].iloc[0]
             with st.form("edit_project"):
-                sup = st.text_input("ФИО научного руководителя", value=project["supervisor"])
-                proj = st.text_input("Название проекта", value=project["project_name"])
-                cust = st.text_input("Заказчик", value=project["customer"])
-                prob = st.text_area("Решаемая проблема", value=project["problem"])
-                comp = st.text_input("Конкурент", value=project["competitor"])
-                adv = st.text_input("Преимущество", value=project["advantage"])
-                part = st.text_input("Партнёр", value=project["partner"])
-                role = st.selectbox("Роль МИЭМ", ROLES_MIEM, index=ROLES_MIEM.index(project["role_miem"]) if project["role_miem"] in ROLES_MIEM else 0)
-                hor = st.selectbox("Горизонт реализации", HORIZON_LIST, index=HORIZON_LIST.index(project["horizon"]) if project["horizon"] in HORIZON_LIST else 0)
-                funding = st.selectbox("Источник финансирования", FUNDING_SOURCES, index=FUNDING_SOURCES.index(project["funding_source"]) if project["funding_source"] in FUNDING_SOURCES else 0)
-                lc_stage = st.selectbox("Стадия ЖЦ", LIFECYCLE_STAGES, index=LIFECYCLE_STAGES.index(project["lifecycle_stage"]) if project["lifecycle_stage"] in LIFECYCLE_STAGES else 0)
-                sales_stage = st.selectbox("Этап продвижения", SALES_STAGES, index=SALES_STAGES.index(project["sales_stage"]) if project["sales_stage"] in SALES_STAGES else 0)
+                sup = st.text_input("ФИО руководителя", value=proj["supervisor"])
+                pname = st.text_input("Название", value=proj["project_name"])
+                cust = st.text_input("Заказчик", value=proj["customer"])
+                prob = st.text_area("Проблема", value=proj["problem"])
+                comp = st.text_input("Конкурент", value=proj["competitor"])
+                adv = st.text_input("Преимущество", value=proj["advantage"])
+                part = st.text_input("Партнёр", value=proj["partner"])
+                role = st.selectbox("Роль МИЭМ", ROLES_MIEM, index=ROLES_MIEM.index(proj["role_miem"]) if proj["role_miem"] in ROLES_MIEM else 0)
+                hor = st.selectbox("Горизонт", HORIZON_LIST, index=HORIZON_LIST.index(proj["horizon"]) if proj["horizon"] in HORIZON_LIST else 0)
+                funding = st.selectbox("Источник", FUNDING_SOURCES, index=FUNDING_SOURCES.index(proj["funding_source"]) if proj["funding_source"] in FUNDING_SOURCES else 0)
+                lc = st.selectbox("Стадия ЖЦ", LIFECYCLE_STAGES, index=LIFECYCLE_STAGES.index(proj["lifecycle_stage"]) if proj["lifecycle_stage"] in LIFECYCLE_STAGES else 0)
+                sales = st.selectbox("Этап продаж", SALES_STAGES, index=SALES_STAGES.index(proj["sales_stage"]) if proj["sales_stage"] in SALES_STAGES else 0)
                 col1, col2 = st.columns(2)
-                with col1:
-                    saved = st.form_submit_button("Сохранить")
-                with col2:
-                    deleted = st.form_submit_button("Удалить проект")
+                saved = col1.form_submit_button("Сохранить")
+                deleted = col2.form_submit_button("Удалить")
                 if saved:
-                    df.loc[df["id"] == selected_id, ["supervisor", "project_name", "customer", "problem", "competitor",
-                                                     "advantage", "partner", "role_miem", "horizon", "funding_source",
-                                                     "lifecycle_stage", "sales_stage"]] = \
-                        [sup, proj, cust, prob, comp, adv, part, role, hor, funding, lc_stage, sales_stage]
-                    df.loc[df["id"] == selected_id, "stage_change_date"] = datetime.now()
-                    df.loc[df["id"] == selected_id, "stage_change_reason"] = "Редактирование проекта"
+                    df.loc[df["id"] == sel_id, ["supervisor", "project_name", "customer", "problem", "competitor",
+                                                 "advantage", "partner", "role_miem", "horizon", "funding_source",
+                                                 "lifecycle_stage", "sales_stage"]] = \
+                        [sup, pname, cust, prob, comp, adv, part, role, hor, funding, lc, sales]
+                    df.loc[df["id"] == sel_id, "stage_change_date"] = datetime.now()
+                    df.loc[df["id"] == sel_id, "stage_change_reason"] = "Редактирование"
                     save_data(df)
                     st.success("Сохранено")
                     st.rerun()
                 if deleted:
-                    df = df[df["id"] != selected_id]
+                    df = df[df["id"] != sel_id]
                     save_data(df)
                     st.success("Удалено")
                     st.rerun()
@@ -354,86 +331,120 @@ elif page == "📊 Дашборд":
         col2.metric("Научных руководителей", df["supervisor"].nunique())
         col3.metric("Средний УГТ задела", f"{df['supervisor_ugt'].mean():.1f}")
 
-        # Воронка продаж (этапы продвижения) с улучшенными осями
         st.subheader("Воронка этапов продвижения")
         sales_counts = df["sales_stage"].value_counts().reindex(SALES_STAGES, fill_value=0).reset_index()
         sales_counts.columns = ["Этап продвижения", "Количество проектов"]
-        chart = alt.Chart(sales_counts).mark_bar(color="steelblue").encode(
+        # Вычисляем среднее
+        mean_sales = sales_counts["Количество проектов"].mean()
+        base = alt.Chart(sales_counts).mark_bar(color="steelblue").encode(
             x=alt.X("Этап продвижения", sort=SALES_STAGES, title="Этап продвижения", axis=alt.Axis(labelFontSize=12, titleFontSize=14, titleFontWeight='bold')),
-            y=alt.Y("Количество проектов", title="Количество проектов", axis=alt.Axis(labelFontSize=12, titleFontSize=14, titleFontWeight='bold'))
+            y=alt.Y("Количество проектов", title="Количество", axis=alt.Axis(labelFontSize=12, titleFontSize=14, titleFontWeight='bold'))
         ).properties(width=700, height=400)
-        # Добавляем пунктирные горизонтальные линии (среднее или просто линии через правило)
-        mean_count = sales_counts["Количество проектов"].mean()
-        rule = alt.Chart(pd.DataFrame({'y': [mean_count]})).mark_rule(strokeDash=[5,5], color='gray').encode(y='y')
-        st.altair_chart(chart + rule, use_container_width=True)
+        line = alt.Chart(pd.DataFrame({'y': [mean_sales]})).mark_rule(strokeDash=[5,5], color='gray').encode(y='y')
+        text = alt.Chart(pd.DataFrame({'y': [mean_sales], 'txt': [f'среднее = {mean_sales:.1f}']})).mark_text(dy=-10, color='gray', fontSize=12).encode(y='y', text='txt')
+        st.altair_chart(base + line + text, use_container_width=True)
 
-        # Распределение по стадиям ЖЦ
         st.subheader("Стадии жизненного цикла продукта")
         lc_counts = df["lifecycle_stage"].value_counts().reindex(LIFECYCLE_STAGES, fill_value=0).reset_index()
         lc_counts.columns = ["Стадия ЖЦ", "Количество проектов"]
-        chart2 = alt.Chart(lc_counts).mark_bar(color="darkorange").encode(
-            x=alt.X("Стадия ЖЦ", sort=LIFECYCLE_STAGES, title="Стадия ЖЦ", axis=alt.Axis(labelFontSize=12, titleFontSize=14, titleFontWeight='bold')),
-            y=alt.Y("Количество проектов", title="Количество проектов", axis=alt.Axis(labelFontSize=12, titleFontSize=14, titleFontWeight='bold'))
-        ).properties(width=700, height=400)
         mean_lc = lc_counts["Количество проектов"].mean()
-        rule2 = alt.Chart(pd.DataFrame({'y': [mean_lc]})).mark_rule(strokeDash=[5,5], color='gray').encode(y='y')
-        st.altair_chart(chart2 + rule2, use_container_width=True)
+        base2 = alt.Chart(lc_counts).mark_bar(color="darkorange").encode(
+            x=alt.X("Стадия ЖЦ", sort=LIFECYCLE_STAGES, title="Стадия ЖЦ", axis=alt.Axis(labelFontSize=12, titleFontSize=14, titleFontWeight='bold')),
+            y=alt.Y("Количество проектов", title="Количество", axis=alt.Axis(labelFontSize=12, titleFontSize=14, titleFontWeight='bold'))
+        ).properties(width=700, height=400)
+        line2 = alt.Chart(pd.DataFrame({'y': [mean_lc]})).mark_rule(strokeDash=[5,5], color='gray').encode(y='y')
+        text2 = alt.Chart(pd.DataFrame({'y': [mean_lc], 'txt': [f'среднее = {mean_lc:.1f}']})).mark_text(dy=-10, color='gray', fontSize=12).encode(y='y', text='txt')
+        st.altair_chart(base2 + line2 + text2, use_container_width=True)
 
-        # Распределение по УГТ задела научных групп (целые числа на оси)
         st.subheader("Уровень УГТ задела научных групп")
         ugt_counts = df["supervisor_ugt"].value_counts().sort_index().reset_index()
         ugt_counts.columns = ["УГТ", "Количество руководителей"]
-        # Преобразуем УГТ в целочисленный тип для оси
         ugt_counts["УГТ"] = ugt_counts["УГТ"].astype(int)
-        chart3 = alt.Chart(ugt_counts).mark_bar(color="green").encode(
+        mean_ugt = ugt_counts["Количество руководителей"].mean()
+        base3 = alt.Chart(ugt_counts).mark_bar(color="green").encode(
             x=alt.X("УГТ:Q", title="УГТ", axis=alt.Axis(labelFontSize=12, titleFontSize=14, titleFontWeight='bold', format='d')),
             y=alt.Y("Количество руководителей:Q", title="Количество", axis=alt.Axis(labelFontSize=12, titleFontSize=14, titleFontWeight='bold'))
         ).properties(width=600, height=400)
-        mean_ugt = ugt_counts["Количество руководителей"].mean()
-        rule3 = alt.Chart(pd.DataFrame({'y': [mean_ugt]})).mark_rule(strokeDash=[5,5], color='gray').encode(y='y')
-        st.altair_chart(chart3 + rule3, use_container_width=True)
+        line3 = alt.Chart(pd.DataFrame({'y': [mean_ugt]})).mark_rule(strokeDash=[5,5], color='gray').encode(y='y')
+        text3 = alt.Chart(pd.DataFrame({'y': [mean_ugt], 'txt': [f'среднее = {mean_ugt:.1f}']})).mark_text(dy=-10, color='gray', fontSize=12).encode(y='y', text='txt')
+        st.altair_chart(base3 + line3 + text3, use_container_width=True)
 
-        # Последние изменения
         st.subheader("Последние изменения проектов")
         if "stage_change_date" in df.columns and not df["stage_change_date"].isna().all():
-            history = df[["project_name", "customer", "sales_stage", "stage_change_date", "stage_change_reason"]].dropna(subset=["stage_change_date"])
-            history = history.sort_values("stage_change_date", ascending=False).head(10)
-            history.columns = ["Название проекта", "Заказчик", "Этап продвижения", "Дата изменения", "Причина"]
-            st.dataframe(history, hide_index=True, use_container_width=True)
+            hist = df[["project_name", "customer", "sales_stage", "stage_change_date", "stage_change_reason"]].dropna(subset=["stage_change_date"])
+            hist = hist.sort_values("stage_change_date", ascending=False).head(10)
+            hist.columns = ["Проект", "Заказчик", "Этап", "Дата", "Причина"]
+            st.dataframe(hist, hide_index=True, use_container_width=True)
 
-# ---------- СТРАНИЦА "ЭКСПОРТ / ИМПОРТ" ----------
+# ---------- СТРАНИЦА "ЭКСПОРТ / ИМПОРТ" + ДЕМО-ДАННЫЕ ----------
 elif page == "💾 Экспорт / Импорт":
-    st.header("Резервное копирование данных")
+    st.header("Резервное копирование и восстановление")
     df = load_data()
 
+    # Кнопка создания демо-данных (для презентации)
+    st.subheader("🎲 Демо-данные (только для презентации)")
+    if st.button("Создать примеры проектов и руководителей"):
+        demo_df = pd.DataFrame(columns=COLUMNS)
+        demo_df["id"] = [1,2,3,4,5]
+        demo_df["supervisor"] = ["Аксенов С.А.", "Петросянц К.О.", "Зунин В.В.", "Романов А.Ю.", "Сергеев А.В."]
+        demo_df["supervisor_ugt"] = [5, 6, 3, 4, 7]
+        demo_df["supervisor_department"] = ["Центр квантовых метаматериалов", "Научно-учебная лаборатория квантовой наноэлектроники", "Учебная лаборатория систем автоматизированного проектирования", "Учебная лаборатория систем автоматизированного проектирования", ""]
+        demo_df["supervisor_team"] = ["3 чел: 1 к.н., 2 инж.", "12 чел: 3 д.н., 5 к.н., 4 инж.", "2 чел: 1 ст.преп., 1 асп.", "5 чел: 1 д.т.н., 4 студ.", "8 чел: 1 доцент, 1 эксперт, ..."]
+        demo_df["supervisor_competencies"] = ["Моделирование процессов", "SPICE-модели", "ИИ для RTL", "Системы на кристалле", "Кибербезопасность"]
+        demo_df["supervisor_publications"] = ["5 Scopus", "12 ВАК", "3 патента", "10 учебников", "5 CTF побед"]
+        demo_df["supervisor_grants"] = ["РНФ 1.5 млн", "РНФ 60 млн", "планируется", "Yadro 600 тыс.", "ЦПМ 4 млн"]
+        demo_df["supervisor_niokr"] = ["ПО МКЭ", "АО Микрон", "совместно с ФПИ", "перевод книг", "платформа ВсОШ"]
+        demo_df["supervisor_rid_protected"] = ["ПО МКЭ", "патенты", "", "патенты, ПО", ""]
+        demo_df["supervisor_rid_unprotected"] = ["Ноу-хау", "", "ПО", "ПО", "ПО"]
+        demo_df["supervisor_next_ugt"] = ["Разработка прототипа", "Методики верификации", "Закупка оборудования", "Апробация курсов", "Масштабирование"]
+        demo_df["project_name"] = [
+            "Моделирование СПФ для НПО Машиностроения", "SPICE-модели для АО Микрон",
+            "Нейросетевая генерация RTL", "Перевод учебников SystemVerilog", "Платформа для ВсОШ по ИБ"
+        ]
+        demo_df["customer"] = ["НПО Машиностроения", "АО «Микрон»", "ООО «Альфачип»", "Yadro", "Минпросвещения РФ"]
+        demo_df["problem"] = ["Отсутствие отечественных инструментов", "Нет верифицированных моделей", "Ручной RTL-код", "Не хватает учебников", "Региональное неравенство"]
+        demo_df["competitor"] = ["МГТУ им. Баумана", "Infineon, ON Semi", "GitHub Copilot", "Другие вузы", "ИТМО, МГУ"]
+        demo_df["advantage"] = ["Научный задел", "Точность +25%", "Адаптация под Verilog", "Экспертиза", "Олимпиадный опыт"]
+        demo_df["partner"] = ["МИСИС", "", "ФИЦ ИУ РАН", "ДМК Пресс", "ГК ИнфоВотч"]
+        demo_df["role_miem"] = ["Лицензиар", "Соисполнитель", "Соисполнитель", "Субподрядчик", "Соисполнитель"]
+        demo_df["horizon"] = ["6-12 месяцев", "6-12 месяцев", "6-12 месяцев", "3-6 месяцев", "6-12 месяцев"]
+        demo_df["funding_source"] = ["Внешний корпоративный (компания)"] * 5
+        demo_df["lifecycle_stage"] = ["Планирование (НИР)", "Планирование (НИР)", "Планирование (НИР)", "Проектирование (ОКР)", "Разработка"]
+        demo_df["sales_stage"] = ["Квалификация", "Выявление проблем", "Формирование видения", "Переговоры и возражения", "Обоснование ценности"]
+        demo_df["stage_change_reason"] = "Создано демо"
+        demo_df["stage_change_date"] = datetime.now()
+        # Приводим к типам
+        for col in COLUMNS:
+            if col not in demo_df.columns:
+                demo_df[col] = ""
+        demo_df = demo_df[COLUMNS]
+        save_data(demo_df)
+        st.success("Создано 5 демо-проектов с 5 руководителями. Обновите страницу.")
+        st.rerun()
+
+    st.divider()
     st.subheader("📥 Скачать текущую базу")
     if not df.empty:
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False)
-        st.download_button(
-            label="Скачать projects.xlsx",
-            data=output.getvalue(),
-            file_name="projects_backup.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        st.download_button("Скачать projects.xlsx", data=output.getvalue(), file_name="projects_backup.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     else:
         st.warning("Нет данных для экспорта")
 
     st.divider()
-
     st.subheader("📤 Восстановить из файла")
-    uploaded = st.file_uploader("Загрузите ранее сохранённый файл .xlsx", type=["xlsx"])
+    uploaded = st.file_uploader("Загрузите ранее сохранённый .xlsx", type=["xlsx"])
     if uploaded is not None:
         try:
             backup_df = pd.read_excel(uploaded)
-            required_cols = ["id", "supervisor", "project_name", "customer", "supervisor_ugt"]
-            if all(col in backup_df.columns for col in required_cols):
+            required = ["id", "supervisor", "project_name", "customer", "supervisor_ugt"]
+            if all(c in backup_df.columns for c in required):
                 backup_df = backup_df.reset_index(drop=True)
                 backup_df.to_excel(DATA_FILE, index=False)
-                st.success("База данных восстановлена! Перезагрузите страницу.")
+                st.success("База восстановлена! Перезагрузите страницу.")
                 st.rerun()
             else:
-                st.error(f"Файл не содержит необходимых колонок: {required_cols}")
+                st.error(f"Файл не содержит колонок: {required}")
         except Exception as e:
-            st.error(f"Ошибка чтения файла: {e}")
+            st.error(f"Ошибка: {e}")
