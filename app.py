@@ -9,8 +9,8 @@ import io
 # ---------- НАСТРОЙКА СТРАНИЦЫ ----------
 st.set_page_config(page_title="CRM НИУ ВШЭ МИЭМ", layout="wide")
 
-# Логотип (прямая ссылка на логотип ВШЭ, можно заменить на локальный файл)
-st.image("https://www.hse.ru/mirror/pubs/share/794465550.png", width=100)
+# Логотип (файл должен лежать в одной папке с app.py)
+st.image("01_Logo_HSE_full_rus_Pantone.png", width=120)
 
 # Заголовок в две строки
 st.markdown("""
