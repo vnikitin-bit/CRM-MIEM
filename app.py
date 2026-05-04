@@ -9,8 +9,8 @@ import io
 # ---------- НАСТРОЙКА СТРАНИЦЫ ----------
 st.set_page_config(page_title="CRM НИУ ВШЭ МИЭМ", layout="wide")
 
-# Логотип (файл должен лежать в одной папке с app.py)
-st.image("01_Logo_HSE_full_rus_Pantone.png", width=120)
+# Логотип (прямая ссылка на логотип ВШЭ, можно заменить на локальный файл)
+st.image("https://www.hse.ru/mirror/pubs/share/794465550.png", width=100)
 
 # Заголовок в две строки
 st.markdown("""
@@ -52,7 +52,7 @@ def load_data():
     df["supervisor_ugt"] = pd.to_numeric(df["supervisor_ugt"], errors="coerce").fillna(1).astype(int)
     if "stage_change_date" in df.columns:
         df["stage_change_date"] = pd.to_datetime(df["stage_change_date"], errors="coerce")
-    # Убираем мусор
+    # Удаляем записи с пустым заказчиком или "[вручную]"
     df = df[~df["customer"].astype(str).str.contains(r"\[вручную\]", na=False, case=False)]
     df = df[df["customer"].notna() & (df["customer"].astype(str).str.strip() != "")]
     df = df.reset_index(drop=True)
@@ -66,31 +66,7 @@ def save_data(df):
 def get_next_id(df):
     return int(df["id"].max() + 1) if not df.empty else 1
 
-# ---------- СПИСОК УГТ (полные названия) ----------
-UGT_FULL_NAMES = [
-    "УГТ 1 Фундаментальные принципы",
-    "УГТ 2 Технологическая концепция",
-    "УГТ 3 Экспериментальное подтверждение",
-    "УГТ 4 Лабораторная проверка",
-    "УГТ 5 Испытания в близких к реальным условиях",
-    "УГТ 6 Прототип в близких к реальных условиях",
-    "УГТ 7 Прототип в эксплуатационных условиях",
-    "УГТ 8 Штатная система квалифицирована",
-    "УГТ 9 Реальная система в эксплуатации"
-]
-
-def ugt_number_from_text(text):
-    """Извлекает число из строки вида 'УГТ 5 ...' """
-    match = re.search(r"УГТ\s*(\d)", text)
-    return int(match.group(1)) if match else 1
-
-def ugt_text_from_number(num):
-    """Возвращает полное название УГТ по числу (1-9)"""
-    if 1 <= num <= 9:
-        return UGT_FULL_NAMES[num-1]
-    return UGT_FULL_NAMES[0]
-
-# ---------- ДРУГИЕ СПИСКИ ----------
+# ---------- СПИСКИ ДЛЯ ВЫБОРА ----------
 LIFECYCLE_STAGES = ["Планирование (НИР)", "Проектирование (ОКР)", "Разработка", "Внедрение", "Эксплуатация"]
 SALES_STAGES = [
     "Квалификация", "Выявление проблем", "Формирование видения",
@@ -157,14 +133,7 @@ if page == "👨‍🔬 Научные руководители":
             current_unprot = sup_df.iloc[0]["supervisor_rid_unprotected"] if "supervisor_rid_unprotected" in sup_df.columns else ""
             unprot_idx = UNPROTECTED_RID_LIST.index(current_unprot) if current_unprot in UNPROTECTED_RID_LIST else 0
             rid_unprotected = st.selectbox("Неоформленные РИД (выбрать)", UNPROTECTED_RID_LIST, index=unprot_idx)
-
-            # Выпадающий список для УГТ (полные названия)
-            current_ugt_num = int(sup_df.iloc[0]["supervisor_ugt"])
-            current_ugt_text = ugt_text_from_number(current_ugt_num)
-            ugt_index = UGT_FULL_NAMES.index(current_ugt_text) if current_ugt_text in UGT_FULL_NAMES else 0
-            ugt_selected = st.selectbox("УГТ задела научной группы (выбрать)", UGT_FULL_NAMES, index=ugt_index)
-            ugt_number = ugt_number_from_text(ugt_selected)
-
+            ugt = st.slider("УГТ задела научной группы (выбрать)", 1, 9, value=int(sup_df.iloc[0]["supervisor_ugt"]))
             next_ugt = st.text_area("Что нужно для следующего УГТ", value=sup_df.iloc[0]["supervisor_next_ugt"])
             if st.button("Сохранить данные руководителя"):
                 mask = df["supervisor"] == selected_sup
@@ -178,7 +147,7 @@ if page == "👨‍🔬 Научные руководители":
                     df.loc[mask, "supervisor_niokr"] = niokr
                     df.loc[mask, "supervisor_rid_protected"] = rid_protected
                     df.loc[mask, "supervisor_rid_unprotected"] = rid_unprotected
-                    df.loc[mask, "supervisor_ugt"] = ugt_number
+                    df.loc[mask, "supervisor_ugt"] = ugt
                     df.loc[mask, "supervisor_next_ugt"] = next_ugt
                     save_data(df)
                     st.success("Данные сохранены")
@@ -194,7 +163,7 @@ if page == "👨‍🔬 Научные руководители":
         st.subheader(f"УГТ задела научной группы: {current_ugt_val}")
         st.progress(current_ugt_val / 9.0)
         next_info = sup_df.iloc[0]["supervisor_next_ugt"]
-        if next_info and next_info.strip():
+        if next_info:
             st.caption(f"📌 Что нужно для следующего УГТ: {next_info}")
 
         for _, row in sup_df.iterrows():
@@ -230,8 +199,8 @@ elif page == "📋 Проекты":
 
         st.subheader(f"Всего проектов: {len(filtered)}")
         if not filtered.empty:
-            display = filtered[["project_name", "customer", "supervisor", "supervisor_ugt", "lifecycle_stage", "sales_stage", "funding_source"]].copy()
-            display.columns = ["Название проекта", "Заказчик", "Научный руководитель", "УГТ задела", "Стадия ЖЦ", "Этап продвижения", "Источник финансирования"]
+            display = filtered[["id", "project_name", "customer", "supervisor", "supervisor_ugt", "lifecycle_stage", "sales_stage", "funding_source"]].copy()
+            display.columns = ["ID", "Название проекта", "Заказчик", "Научный руководитель", "УГТ задела", "Стадия ЖЦ", "Этап продвижения", "Источник финансирования"]
             st.dataframe(display, hide_index=True, use_container_width=True)
 
         # Таблица последних изменений (перенесена с дашборда)
@@ -282,10 +251,13 @@ elif page == "📋 Проекты":
                 else:
                     st.error("Заполните все поля со звёздочкой")
 
-    # Редактирование проекта
+    # Редактирование существующего проекта
     if not df.empty:
         with st.expander("✏️ Редактировать проект"):
-            sel_id = st.selectbox("ID проекта", df["id"].tolist())
+            # Создаём словарь для выбора по ID + Название
+            project_dict = {f"{row['id']} – {row['project_name']}": row['id'] for _, row in df.iterrows()}
+            selected_label = st.selectbox("Выберите проект", list(project_dict.keys()))
+            sel_id = project_dict[selected_label]
             proj = df[df["id"] == sel_id].iloc[0]
             with st.form("edit_project"):
                 sup = st.text_input("ФИО руководителя", value=proj["supervisor"])
