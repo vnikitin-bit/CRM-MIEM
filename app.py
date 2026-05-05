@@ -303,7 +303,7 @@ elif page == "📊 Дашборд":
         col2.metric("Научных руководителей", df["supervisor"].nunique())
         col3.metric("Средний УГТ задела", f"{df['supervisor_ugt'].mean():.1f}")
 
-        st.subheader("Воронка этапов продвижения")
+        st.subheader("Воронка продвижения")
         sales_counts = df["sales_stage"].value_counts().reindex(SALES_STAGES, fill_value=0).reset_index()
         sales_counts.columns = ["Этап продвижения", "Количество проектов"]
         mean_sales = sales_counts["Количество проектов"].mean()
